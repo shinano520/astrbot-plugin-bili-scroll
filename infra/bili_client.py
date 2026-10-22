@@ -344,6 +344,24 @@ class BiliClient:
         data = (result or {}).get("data") or {}
         rpid = str(data.get("rpid") or data.get("rpid_str") or "unknown")
         root_out = str(root) if root else None
+
+        # 验证 @ 是否真的生效：B 站靠解析文本填 content.members，
+        # 解析成功才有值；空数组说明 "太长的文字里 @昵称" 没被识别。
+        try:
+            reply = data.get("reply") or {}
+            members = ((reply.get("content") or {}).get("members")) or []
+            if "@" in (text or ""):
+                if members:
+                    names = [str((m or {}).get("uname") or "") for m in members]
+                    log.info("评论已发 rpid=%s，真的 @ 到 %d 人：%s", rpid, len(members), "、".join(names))
+                else:
+                    log.warning(
+                        "评论已发 rpid=%s，但 @ 没生效（B 站没解析出 members）—— 文案里的 @ 只是普通文字",
+                        rpid,
+                    )
+        except Exception:
+            pass
+
         return rpid, root_out
 
     async def like(self, bvid: str, like: bool = True) -> bool:

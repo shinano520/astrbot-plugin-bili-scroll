@@ -56,7 +56,8 @@ def append_at(text: str, users: list[str], probability: float, max_at: int = 2) 
 
     picked = random.sample(clean, min(len(clean), max_at))
     ats = " ".join(f"@{u}" for u in picked)
-    return f"{text} {ats}"
+    # B 站服务端按文本解析 @，末尾留空格更保险（否则最后一个昵称可能被吞）
+    return f"{text} {ats} "
 
 
 async def make_comment(
