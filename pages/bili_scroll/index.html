@@ -615,13 +615,21 @@
   }
 
   // Tab 切换
+  window.__tabBound = 0;
+  window.__tabClicks = 0;
   document.querySelectorAll('.tab').forEach(function(btn){
+    window.__tabBound++;
     btn.addEventListener('click', function(){
+      window.__tabClicks++;
       document.querySelectorAll('.tab').forEach(function(b){ b.classList.remove('active'); });
       document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
       btn.classList.add('active');
-      document.getElementById('panel-' + btn.getAttribute('data-panel')).classList.add('active');
-      if (btn.getAttribute('data-panel') === 'settings' && !window.__cfgLoaded) loadConfig();
+      var panelEl = document.getElementById('panel-' + btn.getAttribute('data-panel'));
+      if (panelEl) panelEl.classList.add('active');
+      // 加载要放在前面，别让上面任何异常把它拦掉
+      if (btn.getAttribute('data-panel') === 'settings' && !window.__cfgLoaded) {
+        try { loadConfig(); } catch (e) { try { showErr('加载设置失败: ' + e); } catch(_) {} }
+      }
     });
   });
 
