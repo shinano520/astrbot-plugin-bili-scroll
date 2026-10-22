@@ -11,6 +11,7 @@ from typing import Any
 
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
+from astrbot.core.message.components import Image, Plain
 
 from .adapter.affection import AffectionReader
 from .adapter.commands import Commands, scope_of, umo_of
@@ -28,6 +29,7 @@ from .domain.constants import (
 from .domain.models import CheckResult, RoundCost, Video
 from .domain.reply import run_reply_round, verify_comments
 from .domain.style import make_comment
+from .infra import qr_login
 from .infra.bili_client import BiliClient
 from .infra.crypto import CryptoError, load_cookie, load_or_create_key, save_cookie
 from .infra.llm_client import LlmClient
@@ -66,6 +68,7 @@ class BiliScrollPlugin(Star):
 
         self._ctx: RoundContext | None = None
         self._running = False
+        self._login_running = False
         self._scheduler_task: asyncio.Task | None = None
         self._janitor_task: asyncio.Task | None = None
         self._next_run: datetime | None = None
@@ -221,6 +224,52 @@ class BiliScrollPlugin(Star):
             return "已经有一轮在跑了，等它跑完。"
         asyncio.create_task(self._run_round(umo_of(event)))
         return "开始跑，跑完把结果发你。"
+
+    async def cmd_login(self, event: AstrMessageEvent) -> str:
+        """扫码登录：发二维码图片，轮询扫码状态。"""
+        if self._login_running:
+            return "正在等扫码，别重复发。"
+
+        self._login_running = True
+        try:
+            try:
+                key, _url, png = await qr_login.generate_qr()
+            except Exception as e:
+                log.exception("生成二维码失败")
+                return f"生成二维码失败：{truncate(str(e))}"
+
+            try:
+                await event.send(
+                    event.chain_result(
+                        [
+                            Plain(
+                                "手机 B 站扫这个码。确认时选「记住我 / 长期」，别选 24 小时。"
+                            ),
+                            Image.fromBytes(png),
+                        ]
+                    )
+                )
+            except Exception as e:
+                log.warning("发二维码失败：%s", e)
+                return f"二维码生成了但发不出去：{truncate(str(e))}"
+
+            code, cookie = await qr_login.wait_for_scan(key, timeout_seconds=180)
+
+            if code == qr_login.ST_OK and cookie:
+                key_bytes = load_or_create_key(self.data_dir)
+                save_cookie(self.data_dir, cookie, key_bytes)
+                self.bili = BiliClient(
+                    cookie, rate_limit=self._num("bili_rate_limit", 2.0)
+                )
+                check = await self.bili.check_login()
+                if check.ok:
+                    log.info("B 站登录成功：%s", check.detail)
+                    return f"登录成功：{check.detail}"
+                return f"拿到 Cookie 但验证没过：{check.detail}"
+
+            return f"登录没完成：{qr_login.status_text(code)}"
+        finally:
+            self._login_running = False
 
     async def cmd_report(self, event: AstrMessageEvent) -> str:
         text = read_today(self.out_dir)

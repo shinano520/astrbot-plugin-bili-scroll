@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..domain.constants import (
+    CMD_LOGIN,
     CMD_REPORT,
     CMD_RUN,
     CMD_SELFCHECK,
@@ -14,8 +15,9 @@ from ..domain.constants import (
     CMD_UNSUBSCRIBE,
 )
 
-HELP_TEXT = """用法：/bili 跑|报告|停|自检|状态|订阅|退订
+HELP_TEXT = """用法：/bili 登录|跑|报告|停|自检|状态|订阅|退订
 
+登录     扫码登录 B 站（发二维码到当前会话）
 跑       立刻刷一轮
 报告     看今天的日报
 停       停掉正在跑的一轮
@@ -37,6 +39,8 @@ class Commands:
         if not act:
             return HELP_TEXT
 
+        if act == CMD_LOGIN:
+            return await self.plugin.cmd_login(event)
         if act == CMD_RUN:
             return await self.plugin.cmd_run(event)
         if act == CMD_REPORT:

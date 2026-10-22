@@ -99,6 +99,7 @@ NEUTRAL_PERSONA = "你是一个住在服务器里的 AI 助手，说话简短、
 
 # ── 指令 ──────────────────────────────────────────────────────
 CMD_ROOT = "bili"
+CMD_LOGIN = "登录"
 CMD_RUN = "跑"
 CMD_REPORT = "报告"
 CMD_STOP = "停"
