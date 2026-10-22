@@ -357,11 +357,14 @@ class BiliClient:
 
             for it in items:
                 attribute = int(it.get("attribute") or 0)
+                # B 站 attribute：1 悄悄关注 / 2 单向关注 / 6 互相关注 / 128 拉黑
+                # 互关只有 6，别用 2
                 out.append(
                     {
                         "mid": str(it.get("mid") or ""),
                         "uname": it.get("uname") or "",
-                        "mutual": attribute == 2,
+                        "mutual": attribute == 6,
+                        "attribute": attribute,
                     }
                 )
                 if len(out) >= limit:
