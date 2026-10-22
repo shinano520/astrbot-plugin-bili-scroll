@@ -103,6 +103,7 @@
 </head>
 <body>
 <div class="wrap">
+  <div id="errbar" style="display:none;background:rgba(255,92,92,.12);border:1px solid rgba(255,92,92,.4);color:#ff5c5c;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12.5px;white-space:pre-wrap"></div>
 
   <div class="authbar" id="authbar">
     <span style="font-size:12.5px;color:var(--sub);white-space:nowrap">后台账号</span>
@@ -176,6 +177,22 @@
 
 <script type="module">
 (function(){
+  function showErr(msg){
+    try {
+      var el = document.getElementById('errbar');
+      if (!el) return;
+      el.style.display = 'block';
+      el.textContent = String(msg).slice(0, 400);
+    } catch(e) {}
+  }
+  window.addEventListener('error', function(e){
+    showErr('JS 错误: ' + (e.message || e.error || ''));
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    var r = e.reason;
+    showErr('Promise 未捕获: ' + ((r && (r.message || r)) || ''));
+  });
+
   var ROOT = '/api/plug/astrbot_plugin_bili_scroll';
   var TOKEN_KEY = 'bili_scroll_token';
 
@@ -477,7 +494,15 @@
   }
 
   function loadFollowings(){
-    followList.innerHTML = '<div class="placeholder">拉取中…（可能要几秒）</div>';
+    try {
+      if (!followList) {
+        showResult('内部错误：列表容器没找到', false);
+        return;
+      }
+      followList.innerHTML = '<div class="placeholder">拉取中…（可能要几秒）</div>';
+    } catch(e) {
+      return;
+    }
     apiGet('/followings').then(function(d){
       if (!d || !d.ok) throw new Error((d && d.error) || '拉取失败');
       var items = d.items || [];
