@@ -403,7 +403,8 @@
     }
     if (f.type === 'enum' && f.options && f.options.length) {
       var opts = f.options.map(function(o){
-        return '<option value="' + esc(o) + '"' + (o === f.value ? ' selected' : '') + '>' + esc(o) + '</option>';
+        var label = (o === '' || o === null || o === undefined) ? '（不指定）' : o;
+        return '<option value="' + esc(o) + '"' + (o === f.value ? ' selected' : '') + '>' + esc(label) + '</option>';
       }).join('');
       return '<select data-key="' + key + '" data-type="enum">' + opts + '</select>';
     }
