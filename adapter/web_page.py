@@ -217,6 +217,43 @@ PAGE_HTML = """<!DOCTYPE html>
 """
 
 
+def _coerce_value(value, ftype: str):
+    """按 schema 的 type 强制转换，避免前端把 list 传成逗号串。"""
+    import re as _re
+
+    if ftype == "list":
+        if isinstance(value, str):
+            parts = _re.split(r"[,，\n]", value)
+            return [p.strip() for p in parts if p.strip()]
+        if isinstance(value, (list, tuple, set)):
+            return [str(x).strip() for x in value if str(x).strip()]
+        if value is None:
+            return []
+        return [str(value)]
+
+    if ftype == "int":
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
+
+    if ftype == "float":
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    if ftype == "bool":
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "on", "是")
+
+    if ftype == "string":
+        return "" if value is None else str(value)
+
+    return value
+
+
 def _normalize(value: Any, ftype: str) -> Any:
     """把配置值整理成前端好用的形态。"""
     if ftype == "list":
@@ -429,11 +466,26 @@ class WebPage:
 
         saved = 0
         try:
+            _schema = {}
+            try:
+                _schema = self.plugin._schema_map()  # type: ignore[attr-defined]
+            except Exception:
+                try:
+                    import json as _json
+                    from pathlib import Path as _Path
+
+                    sp = _Path(__file__).resolve().parent.parent / "_conf_schema.json"
+                    _schema = _json.loads(sp.read_text(encoding="utf-8"))
+                except Exception:
+                    _schema = {}
+
             for key, value in cfg.items():
                 if key == "persona_file":
                     continue
                 try:
-                    self.plugin.cfg[key] = value
+                    meta = _schema.get(key) or {}
+                    ftype = str(meta.get("type") or "string")
+                    self.plugin.cfg[key] = _coerce_value(value, ftype)
                     saved += 1
                 except Exception:
                     continue
