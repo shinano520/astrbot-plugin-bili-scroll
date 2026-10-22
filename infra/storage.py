@@ -363,9 +363,18 @@ class Storage:
             return await cur.fetchone() is not None
 
     async def list_own_comments(self, since_days: int = 7) -> list[dict]:
+        """只返回「一级评论」（root_rpid 为空）。
+
+        ⚠️ 必须排除大肥鱼自己发的回复：B 站 reply/reply?root=X 返回的是
+        整个楼里所有子评论，如果把回复也当检查对象，就会同一句被反复回复，
+        还会自己回自己形成递归。
+        """
         cutoff = int(time.time()) - since_days * 86400
         async with self.db.execute(
-            "SELECT * FROM own_comments WHERE created_at >= ? ORDER BY created_at DESC",
+            """SELECT * FROM own_comments
+               WHERE created_at >= ?
+                 AND (root_rpid IS NULL OR root_rpid = '' OR root_rpid = 'None')
+               ORDER BY created_at DESC""",
             (cutoff,),
         ) as cur:
             rows = await cur.fetchall()

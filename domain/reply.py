@@ -166,6 +166,9 @@ async def run_reply_round(
 
         handled = False
         for c in replies:
+            # 第二道防线：作者名和自己一样也跳过（mid 已在 bili 层过滤）
+            if c.author and c.author == (getattr(bili, "self_name", "") or ""):
+                continue
             ok, why = should_reply(c, scope=scope, max_len=max_len)
             log.info(
                 "楼中楼 %s by %s → %s（%s）",
