@@ -31,6 +31,7 @@ REFERER = "https://www.bilibili.com/"
 SUB_REPLY_URL = "https://api.bilibili.com/x/v2/reply/reply"
 REPLY_LIST_URL = "https://api.bilibili.com/x/v2/reply/wbi/main"
 FOLLOWINGS_URL = "https://api.bilibili.com/x/relation/followings"
+PLAYER_V2_URL = "https://api.bilibili.com/x/player/v2"
 
 
 class BiliError(Exception):
@@ -167,8 +168,9 @@ class BiliClient:
     async def get_subtitle(self, bvid: str) -> str:
         """取字幕原文。没有字幕返回空串。
 
-        ⚠️ bilibili-api 的 get_subtitle() 必须传 cid，
-        不传会抛 ArgsException("需要 cid")——之前就是这样全空。
+        走 /x/player/v2 直连（不用 bilibili-api 的 get_subtitle，
+        那个要 cid 且返回结构不稳定，实测拿不到）。
+        流程：bvid -> info 拿 cid -> player/v2 拿 subtitles[] -> 下载字幕 json。
         """
         await self._throttle()
         try:
@@ -179,15 +181,34 @@ class BiliClient:
             if not cid:
                 log.info("%s 拿不到 cid", bvid)
                 return ""
-            data = await v.get_subtitle(cid=cid)
         except Exception as e:
-            log.info("取字幕失败 %s: %s", bvid, e)
+            log.info("%s 拿视频信息失败: %s", bvid, e)
             return ""
 
-        subs = ((data or {}).get("subtitle") or {}).get("subtitles") or []
+        # 1) player/v2 拿字幕列表
+        subs: list[dict] = []
+        try:
+            session = await self._get_session()
+            params = {"aid": bvid2aid(bvid), "cid": cid}
+            async with session.get(PLAYER_V2_URL, params=params) as resp:
+                if resp.status != 200:
+                    log.info("%s player/v2 HTTP %s", bvid, resp.status)
+                    return ""
+                payload = await resp.json(content_type=None)
+            if (payload or {}).get("code") != 0:
+                log.info("%s player/v2 code=%s", bvid, payload.get("code"))
+                return ""
+            subs = (
+                ((payload or {}).get("data") or {}).get("subtitle") or {}
+            ).get("subtitles") or []
+        except Exception as e:
+            log.info("%s 拉字幕列表失败: %s", bvid, e)
+            return ""
+
         if not subs:
             return ""
 
+        # 2) 优先中文
         chosen = None
         for s in subs:
             if (s.get("lan") or "").startswith("zh"):
@@ -201,17 +222,22 @@ class BiliClient:
         if url.startswith("//"):
             url = "https:" + url
 
+        # 3) 下载字幕正文
         try:
             session = await self._get_session()
             async with session.get(url) as resp:
                 if resp.status != 200:
                     return ""
-                payload = await resp.json(content_type=None)
-        except Exception:
+                body_json = await resp.json(content_type=None)
+        except Exception as e:
+            log.info("%s 下载字幕失败: %s", bvid, e)
             return ""
 
-        body = (payload or {}).get("body") or []
-        return "".join((seg.get("content") or "") for seg in body).strip()
+        segs = (body_json or {}).get("body") or []
+        text = "".join((seg.get("content") or "") for seg in segs).strip()
+        if text:
+            log.info("%s 字幕 %d 字（共 %d 条轨）", bvid, len(text), len(subs))
+        return text
 
     async def get_comments(self, bvid: str, limit: int = 30) -> list[str]:
         """拉一级热评正文，用于风格归纳与机器人评论剔除。"""
