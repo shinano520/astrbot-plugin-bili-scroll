@@ -188,6 +188,7 @@ class BiliScrollPlugin(Star):
             ("config", self.web.config_get, ["GET"], "读取插件设置"),
             ("config", self.web.config_save, ["POST"], "保存插件设置"),
             ("personas", self.web.personas, ["GET"], "人设列表"),
+            ("bootstrap", self.web.bootstrap, ["POST"], "免密换取 token"),
         )
         for endpoint, handler, methods, desc in routes:
             try:

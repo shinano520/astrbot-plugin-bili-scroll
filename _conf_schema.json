@@ -12,6 +12,18 @@
     "_special": "select_persona",
     "default": ""
   },
+  "admin_username": {
+    "description": "后台账号",
+    "type": "string",
+    "hint": "「刷B站」面板自动登录用。填 AstrBot 后台的用户名，面板就不用每次手输。",
+    "default": "astrbot"
+  },
+  "admin_password": {
+    "description": "后台密码",
+    "type": "string",
+    "hint": "「刷B站」面板自动登录用。仅存在本机插件配置里，不上传任何地方。",
+    "default": ""
+  },
   "keywords": {
     "description": "关注关键词",
     "type": "list",

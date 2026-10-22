@@ -162,15 +162,51 @@
 
 </div>
 
-<script>
+<script type="module">
 (function(){
   var ROOT = '/api/plug/astrbot_plugin_bili_scroll';
   var TOKEN_KEY = 'bili_scroll_token';
 
-  function getToken(){ try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch(e){ return ''; } }
-  function setToken(t){ try { sessionStorage.setItem(TOKEN_KEY, t); } catch(e){} }
+  function getToken(){ try { return localStorage.getItem(TOKEN_KEY) || ''; } catch(e){ return ''; } }
+  function setToken(t){ try { localStorage.setItem(TOKEN_KEY, t); } catch(e){} }
 
-  function request(method, path, body){
+  function bridgeApi(){
+    return window.AstrBotPluginView || window.AstrBotPluginPage || null;
+  }
+
+  // 给 promise 加超时；超时后走 fallback
+  function withTimeout(promise, ms, fallback){
+    var timer;
+    var timeout = new Promise(function(_, reject){
+      timer = setTimeout(function(){ reject(new Error('bridge 超时')); }, ms);
+    });
+    return Promise.race([promise, timeout]).then(
+      function(v){ clearTimeout(timer); return v; },
+      function(e){
+        clearTimeout(timer);
+        if (fallback) return fallback();
+        throw e;
+      }
+    );
+  }
+
+  function bridgeRequest(method, path, body){
+    var api = bridgeApi();
+    if (!api || typeof api.apiGet !== 'function') {
+      return Promise.reject(new Error('no bridge'));
+    }
+    var call = (method === 'GET')
+      ? api.apiGet(ROOT + path, {})
+      : api.apiPost(ROOT + path, body || {});
+    return Promise.resolve(call).then(function(res){
+      if (res && res.status === 'error' && /未授权/.test(res.message || '')) {
+        throw new Error('未授权');
+      }
+      return res;
+    });
+  }
+
+  function tokenRequest(method, path, body){
     var t = getToken();
     var opt = { method: method, headers: {} };
     if (t) opt.headers['Authorization'] = 'Bearer ' + t;
@@ -185,6 +221,13 @@
         throw new Error('未授权');
       }
       return r.json();
+    });
+  }
+
+  function request(method, path, body){
+    // 先用 bridge（自带登录态，无需密码）；3 秒没响应再退回 token 方式
+    return withTimeout(bridgeRequest(method, path, body), 3000, function(){
+      return tokenRequest(method, path, body);
     });
   }
   function apiGet(path, params){ return request('GET', path); }
@@ -461,13 +504,42 @@
     });
   });
 
-  // 启动：有 token 就直接跑，没有就显示登录条
-  if (getToken()) {
-    boot2();
-  } else {
-    showAuthbar(true, '');
-    setDot('err', '未连接后台');
+  // 启动：有 token 就直跑；没有就用配置里的后台账号免密换一个
+  function autoAuth(){
+    // bridge 可用就不需要任何登录
+    var api = bridgeApi();
+    if (api && typeof api.apiGet === 'function') {
+      Promise.resolve(api.ready ? api.ready() : null)
+        .catch(function(){})
+        .then(function(){ boot2(); });
+      return;
+    }
+    // 没 bridge 但有 token
+    if (getToken()) { boot2(); return; }
+    var d0 = document.getElementById('dot');
+    var t0 = document.getElementById('loginText');
+    if (d0) d0.className = 'dot warn pulse';
+    if (t0) t0.textContent = '连接后台…';
+
+    fetch(ROOT + '/bootstrap', { method: 'POST' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d && d.ok && d.token) {
+          setToken(d.token);
+          boot2();
+          return;
+        }
+        showAuthbar(true, (d && d.error) || '');
+        if (d0) d0.className = 'dot err';
+        if (t0) t0.textContent = '未连接后台';
+      })
+      .catch(function(){
+        showAuthbar(true, '');
+        if (d0) d0.className = 'dot err';
+        if (t0) t0.textContent = '未连接后台';
+      });
   }
+  autoAuth();
 })();
 </script>
 </body>

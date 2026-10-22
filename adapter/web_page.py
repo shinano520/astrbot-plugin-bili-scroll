@@ -20,8 +20,8 @@ log = setup("bili_scroll.web")
 CONFIG_GROUPS: list[tuple[str, list[str]]] = [
     (
         "基础",
-        ["cookie", "persona", "keywords", "search_days", "max_per_day",
-         "quota_per_round", "report_detail"],
+        ["cookie", "persona", "admin_username", "admin_password", "keywords",
+         "search_days", "max_per_day", "quota_per_round", "report_detail"],
     ),
     (
         "调度",
@@ -59,6 +59,8 @@ ENUM_FIELDS = {
 FIELD_LABELS = {
     "cookie": "B 站 Cookie",
     "persona": "使用哪个人设",
+    "admin_username": "后台账号",
+    "admin_password": "后台密码",
     "keywords": "关注关键词",
     "search_days": "搜索最近几天",
     "max_per_day": "每天最多挑几条",
@@ -316,6 +318,50 @@ class WebPage:
             self._pending.pop(key, None)
 
         payload = {"ok": True, "code": code, "detail": detail}
+        return jsonify(payload) if jsonify else payload
+
+    # ── 免密引导：用配置里的后台账号换 token ──────────────────
+    async def bootstrap(self):
+        """页面启动时调用。用插件配置里的后台账号换一个 token，用户不用手输。"""
+        try:
+            from quart import jsonify, request
+
+            referer = request.headers.get("Referer", "") or ""
+            host = request.headers.get("Host", "") or ""
+            # 只接受同域发起的请求（挡掉直接 curl）
+            if host and referer and host not in referer:
+                payload = {"ok": False, "error": "来源不合法"}
+                return jsonify(payload) if jsonify else payload
+        except Exception:
+            jsonify = None
+
+        username = str(self.plugin._get("admin_username") or "").strip()
+        password = str(self.plugin._get("admin_password") or "").strip()
+        if not username or not password:
+            payload = {"ok": False, "error": "没配后台账号"}
+            return jsonify(payload) if jsonify else payload
+
+        token = ""
+        try:
+            import aiohttp
+
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as sess:
+                async with sess.post(
+                    "http://127.0.0.1:6185/api/auth/login",
+                    json={"username": username, "password": password},
+                ) as resp:
+                    data = await resp.json(content_type=None)
+            token = ((data or {}).get("data") or {}).get("token") or ""
+        except Exception as e:
+            payload = {"ok": False, "error": f"登录失败：{truncate(str(e))}"}
+            return jsonify(payload) if jsonify else payload
+
+        if not token:
+            payload = {"ok": False, "error": "账号或密码不对"}
+        else:
+            payload = {"ok": True, "token": token}
+
         return jsonify(payload) if jsonify else payload
 
     # ── 设置读写 ──────────────────────────────────────────────
