@@ -195,9 +195,12 @@
     if (!api || typeof api.apiGet !== 'function') {
       return Promise.reject(new Error('no bridge'));
     }
+    // 关键：父窗口会拼成 /api/v1/plugins/extensions/<pluginName>/<endpoint>
+    // 所以这里只传 'status' / 'config'，绝不能带插件名
+    var ep = String(path || '').replace(/^\/+/, '');
     var call = (method === 'GET')
-      ? api.apiGet(ROOT + path, {})
-      : api.apiPost(ROOT + path, body || {});
+      ? api.apiGet(ep, {})
+      : api.apiPost(ep, body || {});
     return Promise.resolve(call).then(function(res){
       if (res && res.status === 'error' && /未授权/.test(res.message || '')) {
         throw new Error('未授权');
@@ -226,7 +229,7 @@
 
   function request(method, path, body){
     // 先用 bridge（自带登录态，无需密码）；3 秒没响应再退回 token 方式
-    return withTimeout(bridgeRequest(method, path, body), 3000, function(){
+    return withTimeout(bridgeRequest(method, path, body), 8000, function(){
       return tokenRequest(method, path, body);
     });
   }
