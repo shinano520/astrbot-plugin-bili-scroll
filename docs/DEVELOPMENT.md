@@ -32,6 +32,7 @@ astrbot-plugin-bili-scroll/
 │   ├── storage.py             # SQLite 仓储（判重/配额/推送日志）
 │   ├── profile_store.py       # 画像与订阅持久化
 │   ├── crypto.py              # Cookie 加解密
+│   ├── transcribe.py          # 本地转写（faster-whisper / AstrBot STT）
 │   └── logger.py              # 脱敏日志
 │
 ├── adapter/                   # 适配层：与 AstrBot 交互
@@ -657,6 +658,90 @@ def render_report(verdicts, cost, detail: str) -> str | None:
 
 **`none` 档仍要写判重表和推送日志**，只是不生成 Markdown。
 
+### 4.11 本地转写（`infra/transcribe.py`）
+
+#### 4.11.1 双后端
+
+```python
+class Transcriber(Protocol):
+    async def transcribe(self, audio_path: Path, duration: int) -> str: ...
+
+class AstrBotSttTranscriber:
+    """复用 AstrBot 已配置的 STT provider。"""
+    async def transcribe(self, audio_path, duration) -> str: ...
+
+class FasterWhisperTranscriber:
+    def __init__(self, model_size: str = "base"):
+        self.model_size = model_size
+        self._model = None
+
+    def _lazy_load(self):
+        from faster_whisper import WhisperModel
+        self._model = WhisperModel(self.model_size, device="cpu", compute_type="int8")
+
+    async def transcribe(self, audio_path, duration) -> str:
+        self._lazy_load()          # 首次调用才加载，不拖慢插件启动
+        segments, _ = self._model.transcribe(str(audio_path), language="zh")
+        return "".join(s.text for s in segments)
+```
+
+**懒加载**：模型在第一次转写时才载入，避免插件启动时卡住。
+
+#### 4.11.2 缓存表
+
+```sql
+CREATE TABLE transcriptions (
+    bvid        TEXT PRIMARY KEY,
+    duration    INTEGER,
+    text        TEXT NOT NULL,
+    model       TEXT,
+    created_at  INTEGER NOT NULL
+);
+```
+
+#### 4.11.3 主流程
+
+```python
+async def get_text(video: Video, bili: BiliClient, tr: Transcriber,
+                   store: Repository, cfg) -> str:
+    if video.subtitle:
+        return video.subtitle                     # 有字幕就不转
+    if not cfg.transcribe_enable:
+        return ""
+    cached = store.get_transcription(video.bvid)
+    if cached:
+        return cached                             # 转过就用缓存
+    if video.duration > cfg.max_duration_seconds:
+        return ""                                 # 太长，跳过
+    audio = await bili.get_audio(video.bvid)
+    text = await asyncio.wait_for(
+        tr.transcribe(audio, video.duration), timeout=120)   # 单条 120 秒上限
+    store.save_transcription(video.bvid, video.duration, text, cfg.model)
+    return text
+```
+
+#### 4.11.4 失败处理
+
+| 场景 | 处理 |
+| --- | --- |
+| 模型加载失败 | 降级为跳过，记日志，**不中断本轮** |
+| 转写超时（120s） | 放弃该条 |
+| 音频下载失败 | 跳过该条 |
+| 结果为空 | 视为无字幕 |
+| 沙盒无网络拉模型 | 退到 `astrbot` 后端；都不可用则跳过 |
+
+#### 4.11.5 资源约束
+
+```python
+TRANSCRIBE_LIMITS = {
+    "concurrency": 1,              # 不抢判读的 CPU
+    "per_round": 3,                # 单轮最多 3 条
+    "per_item_timeout": 120,       # 单条 120 秒
+}
+```
+
+**必须计入单轮 10 分钟总上限**：转写多的轮次会压缩判读条数。
+
 ---
 
 ## 5. 接口抽象
@@ -794,6 +879,16 @@ class ProfileStore(Protocol):
 49. 工作日 13:00（谷时）→ 可调度
 50. 周末任意时刻 → 可调度
 51. `peak_aware=false` → 忽略峰谷，按 windows 走
+
+**本地转写**
+52. 已有字幕 → 不触发转写
+53. 无字幕 + `transcribe.enable=false` → 返回空，不加载模型
+54. 无字幕 + 有缓存 → 直接用缓存，不重复转写
+55. 时长超 `max_duration_seconds` → 跳过
+56. 模型加载失败 → 降级为跳过，本轮继续
+57. 转写成功 → 结果写入 `transcriptions` 表
+58. 单条超 120 秒 → 放弃该条，继续下一条
+59. 单轮转写数达上限 → 后续无字幕视频直接跳过
 
 ---
 
