@@ -18,6 +18,7 @@ from .adapter.commands import Commands, scope_of, umo_of
 from .adapter.event_hook import EventHook, expire_windows
 from .adapter.notifier import Notifier
 from .adapter.scheduler import next_run_at, parse_windows
+from .adapter.web_page import WebPage
 from .domain.constants import (
     CMD_ROOT,
     DEFAULT_KEYWORDS,
@@ -65,6 +66,7 @@ class BiliScrollPlugin(Star):
         self.hook: EventHook | None = None
         self.affection: AffectionReader | None = None
         self.commands: Commands | None = None
+        self.web: WebPage | None = None
 
         self._ctx: RoundContext | None = None
         self._running = False
@@ -72,6 +74,10 @@ class BiliScrollPlugin(Star):
         self._scheduler_task: asyncio.Task | None = None
         self._janitor_task: asyncio.Task | None = None
         self._next_run: datetime | None = None
+
+        # WebUI 扫码登录：必须在 __init__ 注册，Web 服务器启动时才会挂载
+        self.web = WebPage(self)
+        self._register_web_apis()
 
     # ── 配置读取 ──────────────────────────────────────────────
     def _get(self, key: str, default: Any = None) -> Any:
@@ -144,11 +150,38 @@ class BiliScrollPlugin(Star):
         self._janitor_task = asyncio.create_task(self._janitor_loop())
 
         log.info(
-            "刷B站插件已加载：cookie=%s 调度=%s 转写=%s",
+            "刷B站插件已加载：cookie=%s 调度=%s 转写=%s WebUI=%s",
             "\u6709" if cookie else "\u65e0",
             self._flag("schedule_enable", False),
             bool(self.transcriber),
+            "已注册",
         )
+
+    def _register_web_apis(self) -> None:
+        """注册 WebUI 扫码登录端点。访问需 AstrBot 后台登录态。"""
+        routes = (
+            ("page", self.web.page, ["GET"], "B站扫码登录页"),
+            ("qr", self.web.qr, ["GET"], "生成登录二维码"),
+            ("poll", self.web.poll, ["GET"], "轮询扫码状态"),
+        )
+        for endpoint, handler, methods, desc in routes:
+            try:
+                self.context.register_web_api(
+                    f"/astrbot_plugin_bili_scroll/{endpoint}", handler, methods, desc
+                )
+            except Exception as e:
+                log.warning("注册 Web API 失败 %s: %s", endpoint, e)
+
+    def reload_bili_client(self, cookie: str) -> None:
+        """换 Cookie 后重建客户端。"""
+        old = self.bili
+        self.bili = BiliClient(cookie, rate_limit=self._num("bili_rate_limit", 2.0))
+        if old is not None:
+            try:
+                asyncio.create_task(old.close())
+            except Exception:
+                pass
+        log.info("B 站客户端已用新 Cookie 重建")
 
     async def terminate(self) -> None:
         for task in (self._scheduler_task, self._janitor_task):
