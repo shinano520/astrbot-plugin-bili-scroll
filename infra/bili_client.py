@@ -19,7 +19,9 @@ from bilibili_api.utils.aid_bvid_transformer import bvid2aid
 from bilibili_api.utils.network import Credential
 
 from ..domain.models import CheckResult, Comment, Video
-from ..infra.logger import mask
+from ..infra.logger import mask, setup
+
+log = setup("bili_scroll.bili")
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -163,12 +165,23 @@ class BiliClient:
         )
 
     async def get_subtitle(self, bvid: str) -> str:
-        """取字幕原文。没有字幕返回空串。"""
+        """取字幕原文。没有字幕返回空串。
+
+        ⚠️ bilibili-api 的 get_subtitle() 必须传 cid，
+        不传会抛 ArgsException("需要 cid")——之前就是这样全空。
+        """
         await self._throttle()
         try:
             v = bvideo.Video(bvid=bvid, credential=self.credential)
-            data = await v.get_subtitle()
-        except Exception:
+            info = await v.get_info()
+            pages = info.get("pages") or []
+            cid = pages[0].get("cid") if pages else None
+            if not cid:
+                log.info("%s 拿不到 cid", bvid)
+                return ""
+            data = await v.get_subtitle(cid=cid)
+        except Exception as e:
+            log.info("取字幕失败 %s: %s", bvid, e)
             return ""
 
         subs = ((data or {}).get("subtitle") or {}).get("subtitles") or []
