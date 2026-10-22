@@ -279,6 +279,9 @@ class BiliClient:
                 bvid = aid2bvid(int(aid))
             except Exception:
                 continue
+            from_mid = str(((it.get("user") or {}).get("mid")) or "")
+            if str(getattr(self, "uid", "") or "") and from_mid == str(self.uid):
+                continue
             out.append(
                 {
                     "rpid": str(rpid or ""),
@@ -332,14 +335,20 @@ class BiliClient:
 
         data = payload.get("data") or {}
         out: list[Comment] = []
+        my_mid = str(getattr(self, "uid", "") or "")
         for r in data.get("replies") or []:
+            member = r.get("member") or {}
+            mid = str(member.get("mid") or "")
+            # ⚠️ 必须排除自己发的那条，否则会「自己回自己」并无限递归
+            if my_mid and mid == my_mid:
+                continue
             c = r.get("content") or {}
             out.append(
                 Comment(
                     rpid=str(r.get("rpid") or ""),
                     bvid=bvid,
                     content=(c.get("message") or "").strip(),
-                    author=((r.get("member") or {}).get("uname") or ""),
+                    author=(member.get("uname") or ""),
                     is_direct_reply_to_me=True,
                 )
             )
