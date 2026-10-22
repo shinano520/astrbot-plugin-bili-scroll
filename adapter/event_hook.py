@@ -23,9 +23,20 @@ class EventHook:
         self.cfg = cfg
 
     async def handle_message(
-        self, *, scope: str, target_id: str, text: str, umo: str | None = None
+        self,
+        *,
+        scope: str,
+        target_id: str,
+        text: str,
+        umo: str | None = None,
+        at_bot: bool = True,
     ) -> str | None:
-        """返回需要立即回复的文本（订阅/退订确认），否则 None。"""
+        """返回需要立即回复的文本（订阅/退订确认），否则 None。
+
+        群聊订阅必须 @ 机器人（at_bot=True）才生效，
+        否则群里任何人说一句「订阅b站视频」就打开了推送。
+        退订不受限：谁都能随时退。
+        """
         body = (text or "").strip()
         if not body:
             return None
@@ -33,12 +44,17 @@ class EventHook:
         opt_in_phrases = tuple(self.cfg.get("opt_in_phrases") or DEFAULT_OPT_IN_PHRASES)
         opt_out_phrases = tuple(self.cfg.get("opt_out_phrases") or DEFAULT_OPT_OUT_PHRASES)
 
+        # 退订：任何时候都认
         if is_opt_out(body, opt_out_phrases):
             await self.store.upsert_subscriber(scope, target_id, opted_in=False)
             log.info("%s:%s 已退订", scope, target_id)
             return "行，不发了。"
 
+        # 订阅：群聊必须 @ 机器人
         if is_opt_in(body, opt_in_phrases):
+            if scope == "group" and not at_bot:
+                log.info("群 %s 的订阅被忽略（没 @ 机器人）", target_id)
+                return "要订阅的话，@我 再说一句「订阅b站视频」。"
             await self.store.upsert_subscriber(scope, target_id, opted_in=True)
             log.info("%s:%s 已订阅", scope, target_id)
             return "行，刷到有意思的发你。"

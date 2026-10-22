@@ -47,6 +47,23 @@ DATA_DIR = PLUGIN_DIR / "data"
 log = setup("bili_scroll")
 
 
+def _event_at_bot(event: Any) -> bool:
+    """消息里是否 @ 了机器人自己（@全体 不算）。"""
+    try:
+        self_id = str(event.get_self_id() or "")
+        if not self_id:
+            return False
+        for comp in event.get_messages() or []:
+            if comp.__class__.__name__ != "At":
+                continue
+            qq = str(getattr(comp, "qq", "") or "")
+            if qq and qq == self_id:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _extract_prompt(persona: Any) -> str:
     """从不同形态的 persona 对象里取出系统提示词。"""
     if persona is None:
@@ -458,7 +475,11 @@ class BiliScrollPlugin(Star):
             if not target:
                 return
             reply = await self.hook.handle_message(
-                scope=scope, target_id=target, text=text, umo=umo_of(event)
+                scope=scope,
+                target_id=target,
+                text=text,
+                umo=umo_of(event),
+                at_bot=_event_at_bot(event),
             )
             if reply:
                 yield event.plain_result(reply)

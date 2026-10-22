@@ -370,6 +370,9 @@ class BiliClient:
                 if len(out) >= limit:
                     break
             page += 1
+
+        # 互关的排前面，同一类按名字排，方便挑人
+        out.sort(key=lambda x: (not x.get("mutual"), x.get("uname") or ""))
         return out
 
     async def get_audio_url(self, bvid: str) -> str:

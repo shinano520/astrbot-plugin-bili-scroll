@@ -88,6 +88,16 @@
   .switch input:checked{background:var(--accent)}
   .switch input::after{content:'';position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:2px;transition:.2s}
   .switch input:checked::after{left:20px}
+  .toast{
+    position:fixed;top:22px;right:22px;z-index:99999;
+    padding:10px 18px;border-radius:10px;font-size:13px;font-weight:500;
+    background:rgba(62,207,142,.95);color:#0f1115;
+    box-shadow:0 8px 28px rgba(0,0,0,.5);
+    opacity:0;transform:translateY(-8px);pointer-events:none;
+    transition:opacity .22s ease, transform .22s ease;
+  }
+  .toast.show{opacity:1;transform:translateY(0)}
+  .toast.err{background:rgba(255,92,92,.95);color:#fff}
   .sticky-bar{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:16px 0 4px;display:flex;gap:10px;justify-content:flex-end}
 </style>
 </head>
@@ -150,9 +160,9 @@
   <div class="panel" id="panel-atusers">
     <div class="card">
       <h2>评论时 @ 谁</h2>
-      <div class="desc">从互关列表里选。勾了才会在评论末尾 @ 对方（按概率触发）</div>
+      <div class="desc">这里是你的全部关注，互关的排在最前面。勾了才会在评论末尾 @ 对方（按概率触发）</div>
       <div class="actions" style="margin-top:0;margin-bottom:8px">
-        <button id="btnFollow">拉取互关列表</button>
+        <button id="btnFollow">拉取关注列表</button>
         <button class="primary" id="btnSaveAt">保存选择</button>
         <span class="state" style="margin-left:auto"><span id="atCount">已选 0 人</span></span>
       </div>
@@ -160,6 +170,7 @@
     </div>
   </div>
 
+  <div class="toast" id="toast"></div>
 </div>
 
 <script type="module">
@@ -297,6 +308,15 @@
   }
   function hideResult(){ if (result) { result.className = 'result'; result.textContent = ''; } }
   function stopTimer(){ if (timer) { clearInterval(timer); timer = null; } }
+  function toast(msg, ok){
+    var el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'toast show' + (ok ? '' : ' err');
+    clearTimeout(window.__toastTimer);
+    window.__toastTimer = setTimeout(function(){ el.className = 'toast'; }, 1200);
+  }
+
   function updateCount(){
     if (!atCount) return;
     if (!selected.length) { atCount.textContent = '未选择'; return; }
@@ -495,11 +515,17 @@
     apiPost('/at-users', { at_users: selected }).then(function(d){
       if (d && d.ok) {
         if (Array.isArray(d.at_users)) { selected = d.at_users.slice(); updateCount(); }
-        showResult('已保存到配置：' + (selected.length ? selected.join('、') : '（清空）'), true);
+        var who = selected.length ? selected.join('、') : '（清空）';
+        toast('已保存：' + who, true);
+        showResult('已写进插件配置：' + who, true);
       } else {
+        toast('保存失败', false);
         showResult('保存失败：' + ((d && d.error) || ''), false);
       }
-    }).catch(function(e){ showResult('保存失败：' + (e && e.message || e), false); });
+    }).catch(function(e){
+      toast('保存失败', false);
+      showResult('保存失败：' + (e && e.message || e), false);
+    });
   }
 
   function boot2(){
