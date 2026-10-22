@@ -1,11 +1,13 @@
-"""WebUI 端点：扫码登录页、二维码、轮询、状态、互关列表、@ 名单。
+"""WebUI 端点：左侧面板（登录 / 设置 / @ 名单）。
 
-左侧菜单页面在 views/bili_scroll/index.html，调用这里的接口。
+页面在 pages/bili_scroll/index.html，通过 AstrBot 的 bridge 调用这些接口。
 """
 
 from __future__ import annotations
 
 import base64
+import json
+from pathlib import Path
 from typing import Any
 
 from ..infra import qr_login
@@ -13,6 +15,96 @@ from ..infra.crypto import load_or_create_key, save_cookie
 from ..infra.logger import setup, truncate
 
 log = setup("bili_scroll.web")
+
+# 设置页的分组与顺序
+CONFIG_GROUPS: list[tuple[str, list[str]]] = [
+    (
+        "基础",
+        ["cookie", "persona", "keywords", "search_days", "max_per_day",
+         "quota_per_round", "report_detail"],
+    ),
+    (
+        "调度",
+        ["schedule_enable", "schedule_windows", "schedule_jitter_minutes",
+         "schedule_peak_aware"],
+    ),
+    (
+        "推送",
+        ["push_private_enable", "push_group_enable", "push_private_probability",
+         "push_group_probability", "push_cooldown_hours", "feedback_window_minutes",
+         "opt_in_phrases", "opt_out_phrases"],
+    ),
+    (
+        "评论",
+        ["comment_enable", "comment_max_per_round", "comment_style_learning",
+         "comment_style_sample_size", "comment_style_threshold",
+         "comment_max_rewrites", "at_enable", "at_probability"],
+    ),
+    ("回复", ["reply_enable", "reply_max_per_round", "reply_scope"]),
+    ("转写", ["transcribe_enable", "transcribe_model"]),
+    (
+        "好感度",
+        ["affection_enable", "affection_like_threshold", "affection_coin_threshold"],
+    ),
+    ("运行", ["max_llm_calls_per_round", "bili_rate_limit", "data_dir"]),
+]
+
+# 需要下拉的字段
+ENUM_FIELDS = {
+    "reply_scope": ["related", "usage_only"],
+    "report_detail": ["full", "brief", "none"],
+    "transcribe_model": ["tiny", "base", "small"],
+}
+
+FIELD_LABELS = {
+    "cookie": "B 站 Cookie",
+    "persona": "使用哪个人设",
+    "keywords": "关注关键词",
+    "search_days": "搜索最近几天",
+    "max_per_day": "每天最多挑几条",
+    "quota_per_round": "每轮最多挑几条",
+    "report_detail": "日报详细程度",
+    "schedule_enable": "开启时段自动刷",
+    "schedule_windows": "允许执行的时间窗",
+    "schedule_jitter_minutes": "时段内随机抖动（分钟）",
+    "schedule_peak_aware": "避开高峰时段",
+    "push_private_enable": "允许私聊推送",
+    "push_group_enable": "允许群聊推送",
+    "push_private_probability": "私聊推送概率",
+    "push_group_probability": "群聊推送概率",
+    "push_cooldown_hours": "两次推送最小间隔（小时）",
+    "feedback_window_minutes": "反馈窗口（分钟）",
+    "opt_in_phrases": "订阅触发短语",
+    "opt_out_phrases": "退订触发短语",
+    "comment_enable": "自动评论",
+    "comment_max_per_round": "每轮最多发几条评论",
+    "comment_style_learning": "学习评论区风格",
+    "comment_style_sample_size": "风格采样条数",
+    "comment_style_threshold": "风格自检分数线",
+    "comment_max_rewrites": "最多重写几次",
+    "at_enable": "评论时 @ 用户",
+    "at_probability": "@ 的概率",
+    "reply_enable": "回复楼中楼",
+    "reply_max_per_round": "每轮最多回几条",
+    "reply_scope": "回复范围",
+    "transcribe_enable": "本地转写无字幕视频",
+    "transcribe_model": "Whisper 模型",
+    "affection_enable": "按好感度投币/点赞",
+    "affection_like_threshold": "点赞所需好感度",
+    "affection_coin_threshold": "投币所需好感度",
+    "max_llm_calls_per_round": "单轮 LLM 调用上限",
+    "bili_rate_limit": "B 站 API 每秒上限",
+    "data_dir": "数据目录",
+}
+
+
+def _load_schema() -> dict:
+    path = Path(__file__).resolve().parent.parent / "_conf_schema.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        log.info("读 schema 失败：%s", e)
+        return {}
 
 PAGE_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -125,6 +217,30 @@ PAGE_HTML = """<!DOCTYPE html>
 """
 
 
+def _normalize(value: Any, ftype: str) -> Any:
+    """把配置值整理成前端好用的形态。"""
+    if ftype == "list":
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        if isinstance(value, str):
+            return [v.strip() for v in value.splitlines() if v.strip()]
+        return []
+    if ftype == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+    if ftype in ("int", "float"):
+        try:
+            return int(value) if ftype == "int" else float(value)
+        except (TypeError, ValueError):
+            return 0
+    if value is None:
+        return ""
+    return str(value)
+
+
 class WebPage:
     """所有端点都走 AstrBot 后台登录态。"""
 
@@ -200,6 +316,119 @@ class WebPage:
             self._pending.pop(key, None)
 
         payload = {"ok": True, "code": code, "detail": detail}
+        return jsonify(payload) if jsonify else payload
+
+    # ── 设置读写 ──────────────────────────────────────────────
+    async def config_get(self):
+        try:
+            from quart import jsonify
+        except Exception:
+            jsonify = None
+
+        try:
+            schema = _load_schema()
+            groups = []
+            for title, keys in CONFIG_GROUPS:
+                fields = []
+                for key in keys:
+                    meta = schema.get(key, {}) or {}
+                    value = self.plugin._get(key, meta.get("default"))
+                    ftype = meta.get("type", "string")
+                    if key in ENUM_FIELDS:
+                        ftype = "enum"
+                    fields.append(
+                        {
+                            "key": key,
+                            "label": FIELD_LABELS.get(key, meta.get("description", key)),
+                            "hint": meta.get("hint", ""),
+                            "type": ftype,
+                            "value": _normalize(value, ftype),
+                            "options": ENUM_FIELDS.get(key, []),
+                        }
+                    )
+                groups.append({"title": title, "fields": fields})
+            payload = {"ok": True, "groups": groups}
+        except Exception as e:
+            log.exception("读配置失败")
+            payload = {"ok": False, "error": truncate(str(e))}
+
+        return jsonify(payload) if jsonify else payload
+
+    async def config_save(self):
+        try:
+            from quart import jsonify, request
+
+            body = await request.get_json(silent=True) or {}
+        except Exception:
+            return {"ok": False, "error": "无法读取请求体"}
+
+        cfg = body.get("config") or {}
+        if not isinstance(cfg, dict):
+            payload = {"ok": False, "error": "config 必须是对象"}
+            return jsonify(payload) if jsonify else payload
+
+        saved = 0
+        try:
+            for key, value in cfg.items():
+                if key == "persona_file":
+                    continue
+                try:
+                    self.plugin.cfg[key] = value
+                    saved += 1
+                except Exception:
+                    continue
+
+            save = getattr(self.plugin.cfg, "save_config", None)
+            if callable(save):
+                save()
+
+            # 关键项变化时热重载
+            if "persona" in cfg:
+                try:
+                    self.plugin.llm._persona = await self.plugin._load_persona()
+                except Exception as e:
+                    log.info("重载人设失败：%s", e)
+
+            log.info("配置已保存 %d 项", saved)
+            payload = {"ok": True, "saved": saved}
+        except Exception as e:
+            payload = {"ok": False, "error": truncate(str(e))}
+
+        return jsonify(payload) if jsonify else payload
+
+    # ── 人设列表 ──────────────────────────────────────────────
+    async def personas(self):
+        try:
+            from quart import jsonify
+        except Exception:
+            jsonify = None
+
+        items: list[dict] = []
+        try:
+            pm = getattr(self.plugin.context, "persona_manager", None)
+            if pm is not None:
+                for name in ("get_all_personas_v3", "get_all_personas"):
+                    fn = getattr(pm, name, None)
+                    if fn is None:
+                        continue
+                    personas = fn()
+                    if hasattr(personas, "__await__"):
+                        personas = await personas
+                    for p in personas or []:
+                        pid = getattr(p, "persona_id", None) or (
+                            p.get("persona_id") if isinstance(p, dict) else None
+                        )
+                        pname = getattr(p, "name", None) or (
+                            p.get("name") if isinstance(p, dict) else None
+                        )
+                        if pid:
+                            items.append({"id": str(pid), "name": str(pname or pid)})
+                    if items:
+                        break
+            payload = {"ok": True, "items": items}
+        except Exception as e:
+            payload = {"ok": False, "error": truncate(str(e)), "items": []}
+
         return jsonify(payload) if jsonify else payload
 
     # ── 状态 ──────────────────────────────────────────────────

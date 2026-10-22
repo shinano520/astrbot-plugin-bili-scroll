@@ -179,12 +179,15 @@ class BiliScrollPlugin(Star):
     def _register_web_apis(self) -> None:
         """注册 WebUI 扫码登录端点。访问需 AstrBot 后台登录态。"""
         routes = (
-            ("page", self.web.page, ["GET"], "B站扫码登录页"),
+            ("page", self.web.page, ["GET"], "B站面板页"),
             ("qr", self.web.qr, ["GET"], "生成登录二维码"),
             ("poll", self.web.poll, ["GET"], "轮询扫码状态"),
             ("status", self.web.status, ["GET"], "登录与配额状态"),
             ("followings", self.web.followings, ["GET"], "拉互关列表"),
             ("at-users", self.web.at_users, ["POST"], "保存 @ 名单"),
+            ("config", self.web.config_get, ["GET"], "读取插件设置"),
+            ("config", self.web.config_save, ["POST"], "保存插件设置"),
+            ("personas", self.web.personas, ["GET"], "人设列表"),
         )
         for endpoint, handler, methods, desc in routes:
             try:
