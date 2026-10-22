@@ -147,8 +147,7 @@
           <div class="actions">
             <button class="primary" id="btnGen">扫码登录</button>
             <button id="btnRefresh">刷新状态</button>
-            <button id="btnRun">测跑一轮</button>
-            <button id="btnRunReal" style="border-color:rgba(255,92,92,.45);color:#ff8080">真跑一次</button>
+            <button class="primary" id="btnRun">跑一轮</button>
           </div>
           <div class="result" id="result"></div>
         </div>
@@ -190,7 +189,7 @@
   <div class="panel" id="panel-logs">
     <div class="card">
       <h2>实时日志</h2>
-      <div class="desc">扫码、跑一轮、判读、评论、推送的每一步都在这。2 秒自动刷新。</div>
+      <div class="desc">扫码、跑一轮（真实发评论+@）、判读、推送的每一步都在这。2 秒自动刷新。</div>
       <div class="actions" style="margin-top:0;margin-bottom:8px">
         <button id="btnLogClear">清空</button>
         <button id="btnLogPause">暂停</button>
@@ -394,36 +393,15 @@
     }).catch(function(e){ setDot('err', '请求失败'); });
   }
 
-  function runRealOnce(){
-    var b = document.getElementById('btnRunReal');
-    if (b) { b.disabled = true; b.textContent = '真跑中…'; }
-    try { toast('真跑开始，会真的发 1 条评论', true); } catch(e) {}
-    try { showResult('真跑开始：会真的发一条评论到 B 站，跑完看日志里的「评论已发 / @ 生效」两行。', true); } catch(e) {}
-
-    apiPost('run', { dry: false }).then(function(d){
-      if (d && d.ok) {
-        setTimeout(function(){ try { refreshStatus(); } catch(e) {} }, 5000);
-        setTimeout(function(){ try { refreshStatus(); } catch(e) {} }, 60000);
-      } else {
-        try { toast('启动失败', false); } catch(e) {}
-        try { showResult('启动失败：' + ((d && d.error) || ''), false); } catch(e) {}
-      }
-    }).catch(function(e){
-      try { toast('启动失败', false); } catch(e2) {}
-      try { showResult('启动失败：' + (e && e.message || e), false); } catch(e2) {}
-    }).finally(function(){
-      if (b) { b.disabled = false; b.textContent = '真跑一次'; }
-    });
-  }
 
   function runOnce(){
     // 注意：iframe sandbox 没有 allow-modals，confirm/alert/prompt 一律失效，
-    // 所以这里不做二次确认，点了就跑（本身就是"测跑一轮"这个动作）。
+    // 所以这里不做二次确认，点了就跑（这个按钮就是真实执行一轮）。
     var b = document.getElementById('btnRun');
     if (b) { b.disabled = true; b.textContent = '跑着…'; }
-    try { toast('已开始，约 1-3 分钟', true); } catch(e) {}
-    try { showResult('已开始跑一轮（dry-run）。跑完点「刷新状态」看今日已挑。', true); } catch(e) {}
-    apiPost('run', { dry: true }).then(function(d){
+    try { toast('开始真实跑一轮，约 1-3 分钟', true); } catch(e) {}
+    try { showResult('真实跑一轮：会刷视频、读字幕、判读、发评论并 @ 你。进度看「日志」页。', true); } catch(e) {}
+    apiPost('run', { dry: false }).then(function(d){
       if (d && d.ok) {
         // 跑完自动刷新状态（一轮通常 20-60 秒）
         setTimeout(function(){ try { refreshStatus(); } catch(e) {} }, 5000);
@@ -729,7 +707,6 @@
     window.__bili_loadConfig = loadConfig;
     window.__bili_saveConfig = saveConfig;
     window.__bili_runOnce = runOnce;
-    window.__bili_runRealOnce = runRealOnce;
 
     refreshStatus();
     try { startStatusPoll(); } catch(e) {}
@@ -813,8 +790,7 @@
       btnSaveAt: 'saveAt',
       btnReload: 'loadConfig',
       btnSaveCfg: 'saveConfig',
-      btnRun: 'runOnce',
-      btnRunReal: 'runRealOnce'
+      btnRun: 'runOnce'
     };
     var tries = 0;
     function attempt(){
