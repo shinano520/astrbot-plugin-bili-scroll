@@ -342,27 +342,62 @@ class BiliClient:
             raise BiliError(f"发评论失败: {mask(str(e))}") from e
 
         data = (result or {}).get("data") or {}
-        rpid = str(data.get("rpid") or data.get("rpid_str") or "unknown")
+        rpid = str(data.get("rpid") or data.get("rpid_str") or "")
         root_out = str(root) if root else None
 
-        # 验证 @ 是否真的生效：B 站靠解析文本填 content.members，
-        # 解析成功才有值；空数组说明 "太长的文字里 @昵称" 没被识别。
-        try:
-            reply = data.get("reply") or {}
-            members = ((reply.get("content") or {}).get("members")) or []
-            if "@" in (text or ""):
-                if members:
-                    names = [str((m or {}).get("uname") or "") for m in members]
-                    log.info("评论已发 rpid=%s，真的 @ 到 %d 人：%s", rpid, len(members), "、".join(names))
-                else:
-                    log.warning(
-                        "评论已发 rpid=%s，但 @ 没生效（B 站没解析出 members）—— 文案里的 @ 只是普通文字",
-                        rpid,
-                    )
-        except Exception:
-            pass
+        # ⚠️ bilibili-api 的 send_comment 有时不返回 rpid / reply 对象，
+        # 不能据此判断成功与否（会把成功的评论误报成失败）。
+        # 拿不到就回查一次评论区，用自己的 mid 匹配最近那条。
+        members: list | None = None
+        if not rpid or rpid == "unknown":
+            try:
+                rpid, members = await self._find_own_recent_comment(bvid, text)
+            except Exception as e:
+                log.info("回查刚发的评论失败：%s", truncate(str(e)))
+        else:
+            try:
+                reply = data.get("reply") or {}
+                members = ((reply.get("content") or {}).get("members")) or None
+            except Exception:
+                members = None
 
-        return rpid, root_out
+        if "@" in (text or ""):
+            if members:
+                names = [str((m or {}).get("uname") or "") for m in members]
+                log.info("评论已发 rpid=%s，真的 @ 到 %d 人：%s", rpid, len(members), "、".join(names))
+            elif members is not None:
+                log.warning("评论已发 rpid=%s，但 @ 没生效（members 为空）", rpid)
+            else:
+                log.info("评论已发 rpid=%s（@ 是否生效请到 B 站页面确认）", rpid)
+
+        return rpid or "unknown", root_out
+
+    async def _find_own_recent_comment(self, bvid: str, text: str) -> tuple[str, list | None]:
+        """回查评论区，找自己刚发的那条，返回 (rpid, members)。"""
+        aid = bvid2aid(bvid)
+        await self._throttle()
+        session = await self._get_session()
+        async with session.get(
+            "https://api.bilibili.com/x/v2/reply",
+            params={"oid": aid, "type": 1, "sort": 0, "ps": 20, "pn": 1},
+        ) as resp:
+            if resp.status != 200:
+                return "", None
+            payload = await resp.json(content_type=None)
+        if (payload or {}).get("code") != 0:
+            return "", None
+
+        replies = ((payload.get("data") or {}).get("replies")) or []
+        want = (text or "").strip()[:25]
+        for x in replies:
+            member = x.get("member") or {}
+            if str(member.get("mid") or "") != str(self.uid or ""):
+                continue
+            msg = str(((x.get("content") or {}).get("message")) or "").strip()
+            if want and not msg.startswith(want[:15]):
+                continue
+            return str(x.get("rpid") or ""), ((x.get("content") or {}).get("members")) or None
+        return "", None
 
     async def like(self, bvid: str, like: bool = True) -> bool:
         aid = bvid2aid(bvid)
