@@ -15,7 +15,7 @@ from bilibili_api import user as buser
 from bilibili_api import video as bvideo
 from bilibili_api.comment import CommentResourceType, OrderType
 from bilibili_api.search import SearchObjectType
-from bilibili_api.utils.aid_bvid_transformer import bvid2aid
+from bilibili_api.utils.aid_bvid_transformer import aid2bvid, bvid2aid
 from bilibili_api.utils.network import Credential
 
 from ..domain.models import CheckResult, Comment, Video
@@ -238,6 +238,58 @@ class BiliClient:
         if text:
             log.info("%s 字幕 %d 字（共 %d 条轨）", bvid, len(text), len(subs))
         return text
+
+    async def get_at_messages(self, limit: int = 20) -> list[dict]:
+        """拉「有人 @ 我」的消息（B 站消息中心）。
+
+        返回 [{rpid, bvid, content, author, root, parent}]。
+        """
+        await self._throttle()
+        try:
+            session = await self._get_session()
+            async with session.get(
+                "https://api.bilibili.com/x/msgfeed/at",
+                params={"pn": 1, "ps": max(1, min(50, limit))},
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                payload = await resp.json(content_type=None)
+        except Exception as e:
+            log.info("拉 @ 消息失败：%s", truncate(str(e)))
+            return []
+
+        if (payload or {}).get("code") != 0:
+            log.info("拉 @ 消息 code=%s", (payload or {}).get("code"))
+            return []
+
+        out: list[dict] = []
+        for it in ((payload.get("data") or {}).get("items")) or []:
+            item = it.get("item") or {}
+            reply = it.get("reply") or {}
+            content = (
+                ((reply.get("content") or {}).get("message"))
+                or item.get("source_content")
+                or ""
+            )
+            aid = item.get("business_id") or item.get("oid") or it.get("business_id")
+            rpid = reply.get("rpid") or reply.get("rpid_str") or it.get("id")
+            if not aid or not content:
+                continue
+            try:
+                bvid = aid2bvid(int(aid))
+            except Exception:
+                continue
+            out.append(
+                {
+                    "rpid": str(rpid or ""),
+                    "bvid": bvid,
+                    "content": str(content),
+                    "author": str(((it.get("user") or {}).get("nickname")) or ""),
+                    "root": str(reply.get("root") or reply.get("root_str") or ""),
+                    "parent": str(reply.get("parent") or reply.get("parent_str") or ""),
+                }
+            )
+        return out
 
     async def get_comments(self, bvid: str, limit: int = 30) -> list[str]:
         """拉一级热评正文，用于风格归纳与机器人评论剔除。"""

@@ -80,7 +80,7 @@ async def make_comment(
     umo: str | None = None,
     max_rewrites: int = COMMENT_MAX_REWRITES,
     threshold: float = COMMENT_SELF_CHECK_THRESHOLD,
-    sample_size: int = COMMENT_STYLE_SAMPLE_SIZE,
+    sample_size: int = max(60, COMMENT_STYLE_SAMPLE_SIZE),
 ) -> str | None:
     """返回合格评论，或 None（宁可不发）。"""
     log.info("[评论] 开始 bvid=%s", video.bvid)
@@ -92,15 +92,19 @@ async def make_comment(
 
     samples = dedupe_bots(raw_samples or [])
     log.info("[评论] 原始 %d 条，去重后 %d 条", len(raw_samples or []), len(samples))
-    if len(samples) < 5:
-        log.info("评论样本不足（%d 条），不生成评论", len(samples))
-        return None
 
-    try:
-        style = await llm.induce_style(samples, umo=umo)
-    except Exception as e:
-        log.info("风格归纳失败：%s", e)
+    # 不再因为评论少就放弃：这是"大肥鱼感兴趣的视频"，本来就该评论。
+    # 样本少只是学不到网友语气，那就退回它自己的人设口吻。
+    if len(samples) >= 5:
+        try:
+            style = await llm.induce_style(samples, umo=umo)
+            log.info("[评论] 风格已从 %d 条网友评论归纳", len(samples))
+        except Exception as e:
+            log.info("风格归纳失败，改用自身口吻：%s", e)
+            style = {}
+    else:
         style = {}
+        log.info("[评论] 只有 %d 条样本，学不到网友语气，用大肥鱼自己的口吻", len(samples))
 
     for attempt in range(max_rewrites + 1):
         log.info("[评论] 第 %d 次生成", attempt + 1)

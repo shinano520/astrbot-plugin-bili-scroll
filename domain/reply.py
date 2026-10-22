@@ -63,16 +63,15 @@ def should_reply(
     if not comment.is_direct_reply_to_me:
         return False, "not_direct"
 
+    # 只要对方直接回复了大肥鱼的评论，就回一条。
+    # 拒答只保留真正危险的类别（要代码/作品/承诺/吵架/隐私），
+    # scope/length 这类"礼貌性筛选"不再阻断回复。
     refused, why = is_refused(comment.content)
     if refused:
         return False, f"refused:{why}"
 
     if scope == "usage_only" and not is_usage_question(comment.content):
         return False, "not_usage"
-
-    # 需要多轮才说得清的，不算「一两句话能答清」
-    if len(comment.content) > 200:
-        return False, "too_long_question"
 
     return True, "ok"
 
@@ -93,11 +92,53 @@ async def run_reply_round(
     replied = 0
     titles = video_title_map or {}
 
+    # ── 先处理「有人在别的视频 @ 大肥鱼」──
+    # 这类互动优先级最高：用户主动叫它，它必须回应。
+    try:
+        ats = await bili.get_at_messages(limit=20)
+        log.info("@ 大肥鱼的消息：%d 条", len(ats or []))
+        for a in ats or []:
+            if replied >= max_per_round:
+                break
+            c = Comment(
+                rpid=str(a.get("rpid") or ""),
+                bvid=str(a.get("bvid") or ""),
+                content=str(a.get("content") or ""),
+                author=str(a.get("author") or ""),
+                is_direct_reply_to_me=True,
+            )
+            if not c.content or not c.bvid:
+                continue
+            ok, why = should_reply(c, scope=scope, max_len=max_len)
+            log.info("  @ 消息 %s by %s → %s（%s）", c.rpid, c.author or "?", "要回" if ok else "不回", why)
+            if not ok:
+                continue
+            try:
+                body = await llm.write_reply(c, titles.get(c.bvid, ""), umo=umo)
+            except Exception as e:
+                log.info("  生成 @ 回复失败：%s", e)
+                continue
+            if not body or len(body) > max_len:
+                continue
+            root = str(a.get("root") or "") or c.rpid
+            parent = c.rpid
+            try:
+                new_rpid, root_out = await bili.post_comment(
+                    c.bvid, body, root=root, parent=parent
+                )
+                await store.save_own_comment(new_rpid, root_out, c.bvid, body)
+                replied += 1
+                log.info("  已回复 @ 消息 %s（新 rpid=%s）", c.rpid, new_rpid)
+            except Exception as e:
+                log.info("  发送 @ 回复失败：%s", e)
+    except Exception as e:
+        log.info("处理 @ 消息失败：%s", e)
+
     try:
         own = await store.list_own_comments(since_days=since_days)
     except Exception as e:
         log.info("读取自己评论失败：%s", e)
-        return 0
+        return replied
 
     for oc in own:
         if replied >= max_per_round:
@@ -108,17 +149,31 @@ async def run_reply_round(
         rpid = oc.get("rpid") or ""
         bvid = oc.get("bvid") or ""
         if not rpid or rpid == "unknown" or not bvid:
+            # 以前这里静默 continue，导致"评论发了但楼中楼永远不回"且日志无痕。
+            log.info(
+                "跳过一条自己评论（rpid=%s bvid=%s）—— 缺少可用 rpid，无法查楼中楼",
+                rpid or "空",
+                bvid or "空",
+            )
             continue
 
         try:
             replies = await bili.get_sub_replies(bvid, rpid)
+            log.info("查楼中楼 rpid=%s，收到 %d 条回复", rpid, len(replies or []))
         except Exception as e:
             log.info("拉楼中楼失败 %s: %s", rpid, e)
             continue
 
         handled = False
         for c in replies:
-            ok, _why = should_reply(c, scope=scope, max_len=max_len)
+            ok, why = should_reply(c, scope=scope, max_len=max_len)
+            log.info(
+                "楼中楼 %s by %s → %s（%s）",
+                c.rpid,
+                getattr(c, "author", "") or "?",
+                "要回" if ok else "不回",
+                why,
+            )
             if not ok:
                 continue
 
