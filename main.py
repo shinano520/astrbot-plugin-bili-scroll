@@ -184,6 +184,8 @@ class BiliScrollPlugin(Star):
             self._scheduler_task = asyncio.create_task(self._schedule_loop())
 
         self._janitor_task = asyncio.create_task(self._janitor_loop())
+        if self._flag("reply_enable", False):
+            self._reply_task = asyncio.create_task(self._reply_loop())
 
         log.info(
             "刷B站插件已加载：cookie=%s 调度=%s 转写=%s WebUI=%s",
@@ -671,6 +673,33 @@ class BiliScrollPlugin(Star):
             await self.notifier.send_text(umo, text)
         except Exception:
             log.info("%s", text)
+
+    # ── 楼中楼轮询（独立于刷视频）────────────────────────────
+    async def _reply_loop(self) -> None:
+        """每 3 分钟看一次有没有人回复大肥鱼的评论，有就回。
+
+        之前楼中楼只挂在「跑一轮」里，用户回复后要等下一轮刷视频
+        才有反应（可能几小时后），体验上就是"它不理我"。
+        """
+        await asyncio.sleep(45)
+        while True:
+            try:
+                if self._flag("reply_enable", False) and self.bili is not None:
+                    replied = await run_reply_round(
+                        bili=self.bili,
+                        llm=self.llm,
+                        store=self.store,
+                        umo=None,
+                        max_per_round=int(
+                            self._num("reply_max_per_round", REPLY_MAX_PER_ROUND)
+                        ),
+                        scope=str(self._get("reply_scope") or "related"),
+                    )
+                    if replied:
+                        log.info("楼中楼轮询：本轮回复了 %d 条", replied)
+            except Exception as e:
+                log.info("楼中楼轮询出错：%s", truncate(str(e)))
+            await asyncio.sleep(180)
 
     # ── 调度循环 ──────────────────────────────────────────────
     async def _schedule_loop(self) -> None:
