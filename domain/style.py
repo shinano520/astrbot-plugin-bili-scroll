@@ -43,18 +43,29 @@ def dedupe_bots(samples: list[str]) -> list[str]:
     return out
 
 
-def append_at(text: str, users: list[str], probability: float, max_at: int = 2) -> str:
-    """按概率在评论末尾追加 @。B 站靠纯文本识别，@后面要有空格。"""
+def append_at(text: str, users: list[str], probability: float, max_at: int = 0) -> str:
+    """按概率在评论末尾追加 @。
+
+    max_at=0 表示不限制：你勾了几个就 @ 几个（默认行为）。
+    传正数才截断，但永远按配置名单来，不会 @ 到名单外的人。
+    """
     if not text or not users or probability <= 0:
         return text
     if random.random() >= probability:
+        log.info("[@] 本次未命中概率（%.0f%%），不 @", probability * 100)
         return text
 
     clean = [u.strip().lstrip("@") for u in users if u and u.strip()]
     if not clean:
         return text
 
-    picked = random.sample(clean, min(len(clean), max_at))
+    if max_at and max_at > 0 and len(clean) > max_at:
+        picked = random.sample(clean, max_at)
+        log.info("[@] 名单 %d 人，按上限只取 %d 人：%s", len(clean), max_at, "、".join(picked))
+    else:
+        picked = list(clean)
+        log.info("[@] 名单 %d 人，全部 @：%s", len(picked), "、".join(picked))
+
     ats = " ".join(f"@{u}" for u in picked)
     # B 站服务端按文本解析 @，末尾留空格更保险（否则最后一个昵称可能被吞）
     return f"{text} {ats} "

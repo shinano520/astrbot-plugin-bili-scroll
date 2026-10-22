@@ -148,6 +148,7 @@
             <button class="primary" id="btnGen">扫码登录</button>
             <button id="btnRefresh">刷新状态</button>
             <button id="btnRun">测跑一轮</button>
+            <button id="btnRunReal" style="border-color:rgba(255,92,92,.45);color:#ff8080">真跑一次</button>
           </div>
           <div class="result" id="result"></div>
         </div>
@@ -391,6 +392,28 @@
         metaBox.style.display = 'none';
       }
     }).catch(function(e){ setDot('err', '请求失败'); });
+  }
+
+  function runRealOnce(){
+    var b = document.getElementById('btnRunReal');
+    if (b) { b.disabled = true; b.textContent = '真跑中…'; }
+    try { toast('真跑开始，会真的发 1 条评论', true); } catch(e) {}
+    try { showResult('真跑开始：会真的发一条评论到 B 站，跑完看日志里的「评论已发 / @ 生效」两行。', true); } catch(e) {}
+
+    apiPost('run', { dry: false }).then(function(d){
+      if (d && d.ok) {
+        setTimeout(function(){ try { refreshStatus(); } catch(e) {} }, 5000);
+        setTimeout(function(){ try { refreshStatus(); } catch(e) {} }, 60000);
+      } else {
+        try { toast('启动失败', false); } catch(e) {}
+        try { showResult('启动失败：' + ((d && d.error) || ''), false); } catch(e) {}
+      }
+    }).catch(function(e){
+      try { toast('启动失败', false); } catch(e2) {}
+      try { showResult('启动失败：' + (e && e.message || e), false); } catch(e2) {}
+    }).finally(function(){
+      if (b) { b.disabled = false; b.textContent = '真跑一次'; }
+    });
   }
 
   function runOnce(){
@@ -706,6 +729,7 @@
     window.__bili_loadConfig = loadConfig;
     window.__bili_saveConfig = saveConfig;
     window.__bili_runOnce = runOnce;
+    window.__bili_runRealOnce = runRealOnce;
 
     refreshStatus();
     try { startStatusPoll(); } catch(e) {}
@@ -789,7 +813,8 @@
       btnSaveAt: 'saveAt',
       btnReload: 'loadConfig',
       btnSaveCfg: 'saveConfig',
-      btnRun: 'runOnce'
+      btnRun: 'runOnce',
+      btnRunReal: 'runRealOnce'
     };
     var tries = 0;
     function attempt(){
