@@ -378,40 +378,64 @@ class BiliClient:
     async def post_comment(
         self, bvid: str, text: str, root: str | None = None, parent: str | None = None
     ) -> tuple[str, str | None]:
-        """发评论或回复。返回 (rpid, root_rpid)。取不到 rpid 返回 ('unknown', ...)。"""
+        """发评论或回复。返回 (rpid, root_rpid)。
+
+        直连 /x/v2/reply/add，而不是 bilibili-api 的 send_comment：
+        后者返回体里没有 rpid / reply，导致楼中楼永远查不到子评论。
+        """
         aid = bvid2aid(bvid)
         await self._throttle()
+
+        csrf = ""
         try:
-            result = await bcomment.send_comment(
-                text=text,
-                oid=aid,
-                type_=CommentResourceType.VIDEO,
-                root=int(root) if root else None,
-                parent=int(parent) if parent else None,
-                credential=self.credential,
-            )
+            csrf = str(getattr(self.credential, "bili_jct", "") or "")
+        except Exception:
+            csrf = ""
+
+        form = {
+            "oid": str(aid),
+            "type": "1",
+            "message": text,
+            "plat": "1",
+            "csrf": csrf,
+        }
+        if root:
+            form["root"] = str(int(root))
+        if parent:
+            form["parent"] = str(int(parent))
+
+        try:
+            session = await self._get_session()
+            async with session.post(
+                "https://api.bilibili.com/x/v2/reply/add", data=form
+            ) as resp:
+                payload = await resp.json(content_type=None)
         except Exception as e:
             raise BiliError(f"发评论失败: {mask(str(e))}") from e
 
-        data = (result or {}).get("data") or {}
+        code = (payload or {}).get("code")
+        if code != 0:
+            raise BiliError(
+                f"发评论失败 code={code} msg={mask(str((payload or {}).get('message')))}"
+            )
+
+        data = (payload or {}).get("data") or {}
         rpid = str(data.get("rpid") or data.get("rpid_str") or "")
         root_out = str(root) if root else None
 
-        # ⚠️ bilibili-api 的 send_comment 有时不返回 rpid / reply 对象，
-        # 不能据此判断成功与否（会把成功的评论误报成失败）。
-        # 拿不到就回查一次评论区，用自己的 mid 匹配最近那条。
         members: list | None = None
-        if not rpid or rpid == "unknown":
+        try:
+            reply = data.get("reply") or {}
+            members = ((reply.get("content") or {}).get("members")) or None
+        except Exception:
+            members = None
+
+        if not rpid:
+            # 极少数情况接口没给 rpid，回查一次兜底
             try:
                 rpid, members = await self._find_own_recent_comment(bvid, text)
             except Exception as e:
                 log.info("回查刚发的评论失败：%s", truncate(str(e)))
-        else:
-            try:
-                reply = data.get("reply") or {}
-                members = ((reply.get("content") or {}).get("members")) or None
-            except Exception:
-                members = None
 
         if "@" in (text or ""):
             if members:
@@ -421,6 +445,8 @@ class BiliClient:
                 log.warning("评论已发 rpid=%s，但 @ 没生效（members 为空）", rpid)
             else:
                 log.info("评论已发 rpid=%s（@ 是否生效请到 B 站页面确认）", rpid)
+        else:
+            log.info("评论已发 rpid=%s", rpid)
 
         return rpid or "unknown", root_out
 
