@@ -153,8 +153,19 @@ class ScrollService:
         return result
 
     async def _get_text(self, video: Video, transcribed_count: int) -> str:
+        """先真的去拉字幕接口；拉不到再按配置转写。"""
         if video.subtitle and video.subtitle.strip():
             return video.subtitle
+
+        subtitle = ""
+        try:
+            subtitle = await self.bili.get_subtitle(video.bvid)
+        except Exception as e:
+            log.info("取字幕失败 %s: %s", video.bvid, truncate(str(e)))
+
+        if subtitle and subtitle.strip():
+            log.info("%s 拿到字幕（%d 字）", video.bvid, len(subtitle))
+            return subtitle
 
         enable = bool(self.cfg.get("transcribe_enable", False))
         if not enable or self.transcriber is None:
