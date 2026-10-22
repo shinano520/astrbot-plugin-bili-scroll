@@ -1,0 +1,72 @@
+# NOTICE
+
+本项目 **astrbot-plugin-bili-scroll** 是以下项目的移植版本。
+
+---
+
+## 原项目
+
+**dsh-bili-scroll** v0.1.6
+- 仓库：https://github.com/c1overzz/dsh-bili-scroll
+- 许可：MIT License
+- 版权：Copyright (c) 2026 dsh-bili-duty contributors
+
+本项目的产品逻辑（关键词筛选、字幕判读、判重、配额记账、日报结构、峰谷调度、提示注入防护策略）来自原项目。
+代码为 Python 重写，未复制原项目源代码。
+
+原项目 LICENSE 全文：
+
+```text
+MIT License
+
+Copyright (c) 2026 dsh-bili-duty contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
+## 第三方组件
+
+原项目内含 `vendor/bilibili-mcp/`，许可为 MIT：
+
+```text
+MIT License
+
+Copyright (c) 2026 AGI_Ananas
+```
+
+本项目不复制该组件，改为依赖其上游 Python 库 [`bilibili-api-python`](https://github.com/Nemo2011/bilibili-api)（同样为 MIT）。
+
+---
+
+## 本项目许可
+
+本项目自身的代码采用 **PolyForm Noncommercial License 1.0.0**，见 [LICENSE](LICENSE)。
+
+要点：
+
+| 允许 | 禁止 |
+| --- | --- |
+| 个人使用、学习、研究 | **任何商业用途** |
+| 修改（二改） | 销售、倒卖 |
+| 非商业分发 | 付费分发、SaaS 收费 |
+| 保留署名即可再分发 | 移除版权声明后分发 |
+
+原项目的 MIT 部分仍按 MIT 授权，不受本项目许可变更影响。

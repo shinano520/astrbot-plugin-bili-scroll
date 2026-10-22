@@ -107,6 +107,13 @@ AstrBot（astrbot 容器）
 
 ## 许可与致谢
 
-- **MIT**
-- 本项目是 [`c1overzz/dsh-bili-scroll`](https://github.com/c1overzz/dsh-bili-scroll) 的移植版本，保留原项目版权声明
+**PolyForm Noncommercial 1.0.0** —— 可二改，**禁止任何商业用途**（销售、倒卖、付费分发、SaaS 收费一律不行）。
+
+| 允许 | 禁止 |
+| --- | --- |
+| 个人使用、学习、研究 | 任何商业用途 |
+| 修改（二改） | 销售、倒卖 |
+| 非商业分发 | 付费分发、SaaS 收费 |
+
+- 本项目是 [`c1overzz/dsh-bili-scroll`](https://github.com/c1overzz/dsh-bili-scroll)（MIT）的移植版本，原项目版权声明保留见 [NOTICE](NOTICE)
 - 依赖 [`bilibili-api-python`](https://github.com/Nemo2011/bilibili-api) 与 [AstrBot](https://github.com/AstrBotDevs/AstrBot)
