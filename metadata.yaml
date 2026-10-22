@@ -1,0 +1,7 @@
+name: astrbot_plugin_bili_scroll
+display_name: 刷B站
+desc: 每天替你刷一轮B站 —— 读字幕挑出值得的，按偏好推给订阅的人。移植自 dsh-bili-scroll
+help: 指令：/bili 跑 | 报告 | 停 | 自检 | 状态 | 订阅 | 退订
+version: v0.1.0
+author: 大肥鱼
+repo: https://github.com/shinano520/astrbot-plugin-bili-scroll

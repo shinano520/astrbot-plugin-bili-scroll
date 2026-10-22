@@ -1,0 +1,101 @@
+"""评论生成：先归纳风格，再生成，最后自检。宁可不出手，也不发机器人腔。"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from ..infra.logger import setup
+from .constants import (
+    BANNED_COMMENT_PHRASES,
+    COMMENT_MAX_LEN,
+    COMMENT_MAX_REWRITES,
+    COMMENT_MIN_LEN,
+    COMMENT_SELF_CHECK_THRESHOLD,
+    COMMENT_STYLE_SAMPLE_SIZE,
+)
+from .models import Video
+from .policy import validate_comment
+
+log = setup("bili_scroll.style")
+
+
+def dedupe_bots(samples: list[str]) -> list[str]:
+    """去掉模板化/重复的评论。"""
+    seen_exact: set[str] = set()
+    seen_prefix: set[str] = set()
+    out: list[str] = []
+
+    for raw in samples:
+        text = (raw or "").strip()
+        if not text:
+            continue
+        if text in seen_exact:
+            continue
+        prefix = text[:6]
+        if prefix and prefix in seen_prefix:
+            continue
+        seen_exact.add(text)
+        if prefix:
+            seen_prefix.add(prefix)
+        out.append(text)
+
+    return out
+
+
+async def make_comment(
+    video: Video,
+    *,
+    bili: Any,
+    llm: Any,
+    reason: str,
+    umo: str | None = None,
+    max_rewrites: int = COMMENT_MAX_REWRITES,
+    threshold: float = COMMENT_SELF_CHECK_THRESHOLD,
+    sample_size: int = COMMENT_STYLE_SAMPLE_SIZE,
+) -> str | None:
+    """返回合格评论，或 None（宁可不发）。"""
+    try:
+        raw_samples = await bili.get_comments(video.bvid, limit=sample_size)
+    except Exception as e:
+        log.info("拉评论失败，跳过评论：%s", e)
+        return None
+
+    samples = dedupe_bots(raw_samples or [])
+    if len(samples) < 5:
+        log.info("评论样本不足（%d 条），不生成评论", len(samples))
+        return None
+
+    try:
+        style = await llm.induce_style(samples, umo=umo)
+    except Exception as e:
+        log.info("风格归纳失败：%s", e)
+        style = {}
+
+    for attempt in range(max_rewrites + 1):
+        try:
+            text = await llm.write_comment(video, style, reason, umo=umo)
+        except Exception as e:
+            log.info("生成评论失败（第 %d 次）：%s", attempt + 1, e)
+            continue
+
+        ok, why = validate_comment(
+            text,
+            min_len=COMMENT_MIN_LEN,
+            max_len=COMMENT_MAX_LEN,
+            banned=BANNED_COMMENT_PHRASES,
+        )
+        if not ok:
+            log.info("评论校验未通过（%s），重写", why)
+            continue
+
+        try:
+            score = await llm.self_check(text, style, umo=umo)
+        except Exception:
+            score = 0.0
+
+        if score >= threshold:
+            return text
+        log.info("自检 %.2f < %.2f，重写", score, threshold)
+
+    log.info("重写次数用尽，放弃评论（宁可不发）")
+    return None

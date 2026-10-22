@@ -1,0 +1,194 @@
+{
+  "cookie": {
+    "description": "B 站 Cookie",
+    "type": "text",
+    "hint": "整串粘贴，含 SESSDATA 与 bili_jct。加密保存在插件数据目录。",
+    "default": ""
+  },
+  "keywords": {
+    "description": "关注关键词",
+    "type": "list",
+    "hint": "一行一个，留空用内置默认",
+    "default": ["AI", "编程", "科技", "游戏开发", "开源"]
+  },
+  "search_days": {
+    "description": "搜索最近几天的视频",
+    "type": "int",
+    "hint": "",
+    "default": 7
+  },
+  "max_per_day": {
+    "description": "每天最多挑几条",
+    "type": "int",
+    "hint": "0 = 不自动跑，但仍可手动 /bili 跑",
+    "default": 5
+  },
+  "quota_per_round": {
+    "description": "每轮最多挑几条",
+    "type": "int",
+    "hint": "",
+    "default": 3
+  },
+  "report_detail": {
+    "description": "日报详细程度",
+    "type": "string",
+    "hint": "full 完整 / brief 薄版 / none 不写",
+    "default": "full"
+  },
+  "schedule_enable": {
+    "description": "开启时段自动刷",
+    "type": "bool",
+    "hint": "",
+    "default": false
+  },
+  "schedule_windows": {
+    "description": "允许执行的时间窗",
+    "type": "list",
+    "hint": "格式 HH:MM-HH:MM，支持跨零点",
+    "default": ["12:00-14:00", "18:00-09:00"]
+  },
+  "schedule_jitter_minutes": {
+    "description": "时段内随机抖动（分钟）",
+    "type": "int",
+    "hint": "",
+    "default": 30
+  },
+  "schedule_peak_aware": {
+    "description": "避开 DeepSeek 高峰时段",
+    "type": "bool",
+    "hint": "工作日 9-12、14-18 为高峰，周末全谷时",
+    "default": true
+  },
+  "push_private_enable": {
+    "description": "允许私聊推送",
+    "type": "bool",
+    "hint": "必须用户先发订阅短语",
+    "default": true
+  },
+  "push_group_enable": {
+    "description": "允许群聊推送",
+    "type": "bool",
+    "hint": "必须群里发订阅短语",
+    "default": false
+  },
+  "push_private_probability": {
+    "description": "私聊基础推送概率",
+    "type": "float",
+    "hint": "0-1，实际概率还要乘偏好匹配、冷却、反馈系数",
+    "default": 0.6
+  },
+  "push_group_probability": {
+    "description": "群聊基础推送概率",
+    "type": "float",
+    "hint": "0-1",
+    "default": 0.3
+  },
+  "push_cooldown_hours": {
+    "description": "两次推送最小间隔（小时）",
+    "type": "int",
+    "hint": "护栏硬上限：私聊每日 3 条、群聊 2 条、冷却 6 小时",
+    "default": 6
+  },
+  "feedback_window_minutes": {
+    "description": "推送后多久内的回复算反馈",
+    "type": "int",
+    "hint": "",
+    "default": 30
+  },
+  "opt_in_phrases": {
+    "description": "订阅触发短语",
+    "type": "list",
+    "hint": "用户发这些话就进入推送名单",
+    "default": ["大肥鱼给我发b站的视频", "订阅b站视频"]
+  },
+  "opt_out_phrases": {
+    "description": "退订触发短语",
+    "type": "list",
+    "hint": "用户发这些话立即停止推送",
+    "default": ["别发了", "取消订阅"]
+  },
+  "transcribe_enable": {
+    "description": "本地转写无字幕视频",
+    "type": "bool",
+    "hint": "需要容器里装 faster-whisper，首次会下载模型",
+    "default": false
+  },
+  "transcribe_model": {
+    "description": "Whisper 模型大小",
+    "type": "string",
+    "hint": "tiny / base / small",
+    "default": "base"
+  },
+  "comment_enable": {
+    "description": "自动评论",
+    "type": "bool",
+    "hint": "默认关。会用账号说话，开启前请确认。",
+    "default": false
+  },
+  "comment_max_per_round": {
+    "description": "每轮最多发几条评论",
+    "type": "int",
+    "hint": "",
+    "default": 1
+  },
+  "reply_enable": {
+    "description": "回复楼中楼",
+    "type": "bool",
+    "hint": "只回直接回在自己评论下、问插件用法的，一两句话能答清的",
+    "default": false
+  },
+  "reply_max_per_round": {
+    "description": "每轮最多回几条",
+    "type": "int",
+    "hint": "",
+    "default": 2
+  },
+  "affection_enable": {
+    "description": "按好感度决定投币/点赞",
+    "type": "bool",
+    "hint": "需要装 astrbot_plugin_self_learning，读不到会自动降级",
+    "default": false
+  },
+  "affection_like_threshold": {
+    "description": "好感度达到多少才点赞",
+    "type": "int",
+    "hint": "",
+    "default": 40
+  },
+  "affection_coin_threshold": {
+    "description": "好感度达到多少才投币",
+    "type": "int",
+    "hint": "",
+    "default": 60
+  },
+  "persona_source": {
+    "description": "人设来源",
+    "type": "string",
+    "hint": "astrbot 读当前 persona / file 指定文件 / neutral 中性",
+    "default": "astrbot"
+  },
+  "persona_file": {
+    "description": "人设文件路径",
+    "type": "string",
+    "hint": "persona_source=file 时生效",
+    "default": ""
+  },
+  "data_dir": {
+    "description": "数据目录",
+    "type": "string",
+    "hint": "留空用插件目录下的 data/",
+    "default": ""
+  },
+  "max_llm_calls_per_round": {
+    "description": "单轮 LLM 调用上限",
+    "type": "int",
+    "hint": "防止意外烧钱",
+    "default": 20
+  },
+  "bili_rate_limit": {
+    "description": "B 站 API 每秒最多几次",
+    "type": "float",
+    "hint": "",
+    "default": 2.0
+  }
+}
