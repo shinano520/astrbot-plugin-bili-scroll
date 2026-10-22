@@ -320,9 +320,10 @@
     loginText.textContent = text;
   }
   function showResult(t, ok){
-    if (!result) return;
-    result.textContent = t;
-    result.className = 'result ' + (ok ? 'ok' : 'err');
+    var el = document.getElementById('result');
+    if (!el) return;
+    el.textContent = t;
+    el.className = 'result ' + (ok ? 'ok' : 'err');
   }
   function hideResult(){ if (result) { result.className = 'result'; result.textContent = ''; } }
   function stopTimer(){ if (timer) { clearInterval(timer); timer = null; } }
@@ -494,20 +495,18 @@
   }
 
   function loadFollowings(){
-    try {
-      if (!followList) {
-        showResult('内部错误：列表容器没找到', false);
-        return;
-      }
-      followList.innerHTML = '<div class="placeholder">拉取中…（可能要几秒）</div>';
-    } catch(e) {
+    var box = document.getElementById('followList');
+    if (!box) {
+      alert('内部错误：列表容器 followList 不存在');
       return;
     }
+    box.innerHTML = '<div class="placeholder">拉取中…（可能要几秒）</div>';
+    showResult('正在拉取关注列表…', true);
     apiGet('/followings').then(function(d){
       if (!d || !d.ok) throw new Error((d && d.error) || '拉取失败');
       var items = d.items || [];
       if (!items.length) {
-        followList.innerHTML = '<div class="placeholder">没拉到关注列表，可能是 Cookie 失效或没有关注的人</div>';
+        box.innerHTML = '<div class="placeholder">没拉到关注列表，可能是 Cookie 失效或没有关注的人</div>';
         return;
       }
       var html = '';
@@ -518,14 +517,14 @@
           + (it.mutual ? '<span class="tag mutual">互关</span>' : '')
           + '</label>';
       });
-      followList.innerHTML = html;
+      box.innerHTML = html;
       // 已选但不在关注列表里的（历史残留）单独提示
       var names = items.map(function(x){ return x.uname; });
       var orphan = selected.filter(function(x){ return names.indexOf(x) < 0; });
       if (orphan.length) {
         showResult('注意：这些已选名字不在关注列表里，可能是残留 —— ' + orphan.join('、') + '（可取消勾选后保存清掉）', false);
       }
-      followList.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      box.querySelectorAll('input[type=checkbox]').forEach(function(cb){
         cb.addEventListener('change', function(){
           var name = cb.getAttribute('data-name');
           if (cb.checked) { if (selected.indexOf(name) < 0) selected.push(name); }
@@ -534,7 +533,7 @@
         });
       });
     }).catch(function(e){
-      followList.innerHTML = '<div class="placeholder">拉取失败：' + (e && e.message || e) + '</div>';
+      box.innerHTML = '<div class="placeholder">拉取失败：' + (e && e.message || e) + '</div>';
     });
   }
 
@@ -576,6 +575,9 @@
       document.getElementById('btnSaveCfg').addEventListener('click', saveConfig);
       dot.__bound = true;
     }
+
+    window.__biliLoadFollow = loadFollowings;
+    window.__biliSaveAt = saveAt;
 
     refreshStatus();
   }
@@ -627,6 +629,21 @@
       });
   }
   autoAuth();
+
+  // 兜底绑定：即使 boot2 里那段因为异常没跑到，这里也能点上
+  (function bindFallback(){
+    var pairs = [
+      ['btnFollow', function(){ if (window.__biliLoadFollow) window.__biliLoadFollow(); }],
+      ['btnSaveAt', function(){ if (window.__biliSaveAt) window.__biliSaveAt(); }],
+    ];
+    pairs.forEach(function(pair){
+      var el = document.getElementById(pair[0]);
+      if (!el) return;
+      if (el.__fallbackBound) return;
+      el.__fallbackBound = true;
+      el.addEventListener('click', pair[1]);
+    });
+  })();
 })();
 </script>
 </body>
