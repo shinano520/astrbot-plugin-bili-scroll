@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>刷B站</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#181b22; --line:#272b34; --line2:#333a46;
+    --text:#e6e8ee; --sub:#9aa3b2; --accent:#4f8cff;
+    --ok:#3ecf8e; --warn:#f5a623; --err:#ff5c5c;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:20px; background:var(--bg); color:var(--text);
+    font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  .wrap{max-width:920px; margin:0 auto; display:flex; flex-direction:column; gap:16px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px}
+  .card h2{margin:0 0 4px; font-size:15px; font-weight:600}
+  .card .desc{color:var(--sub); font-size:12.5px; margin-bottom:14px}
+  .row{display:flex; gap:16px; flex-wrap:wrap}
+  .col{flex:1; min-width:240px}
+
+  .state{display:flex; align-items:center; gap:10px; font-size:13px}
+  .dot{width:9px; height:9px; border-radius:50%; background:var(--sub); flex:none}
+  .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
+  .dot.pulse{animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+  button{
+    padding:9px 16px; border-radius:9px; border:1px solid var(--line2);
+    background:#22262f; color:var(--text); font-size:13px; cursor:pointer; transition:.15s;
+  }
+  button:hover:not(:disabled){background:#2a2f3a}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  button.primary:hover:not(:disabled){background:#3d7aec}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  .actions{display:flex; gap:10px; margin-top:14px; flex-wrap:wrap}
+
+  .qrbox{
+    display:flex; align-items:center; justify-content:center;
+    width:260px; height:260px; background:#fff; border-radius:12px; padding:16px;
+  }
+  .qrbox img{width:228px; height:228px; image-rendering:pixelated; display:block}
+  .placeholder{color:#888; font-size:12.5px; text-align:center; padding:20px}
+
+  .meta{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-top:6px}
+  .meta div{background:#14171d; border:1px solid var(--line); border-radius:10px; padding:12px}
+  .meta .k{color:var(--sub); font-size:11.5px; margin-bottom:4px}
+  .meta .v{font-size:17px; font-weight:600}
+
+  .list{max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:10px; margin-top:10px}
+  .item{display:flex; align-items:center; gap:10px; padding:9px 12px; border-bottom:1px solid var(--line); font-size:13px}
+  .item:last-child{border-bottom:none}
+  .item:hover{background:#14171d}
+  .item input{accent-color:var(--accent); width:15px; height:15px; cursor:pointer}
+  .tag{font-size:11px; padding:1px 6px; border-radius:5px; border:1px solid var(--line2); color:var(--sub)}
+  .tag.mutual{color:var(--ok); border-color:rgba(62,207,142,.4)}
+
+  .tip{margin-top:12px; font-size:12px; color:var(--sub); line-height:1.7}
+  .tip b{color:var(--warn)}
+  .result{margin-top:12px; padding:10px 12px; border-radius:9px; font-size:12.5px; display:none}
+  .result.ok{display:block; background:rgba(62,207,142,.12); color:var(--ok); border:1px solid rgba(62,207,142,.3)}
+  .result.err{display:block; background:rgba(255,92,92,.12); color:var(--err); border:1px solid rgba(255,92,92,.3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <h2>B 站账号</h2>
+    <div class="desc">没登录就没法搜索、读字幕、发评论</div>
+
+    <div class="row">
+      <div class="col">
+        <div class="state"><span class="dot" id="dot"></span><span id="loginText">检查中…</span></div>
+        <div class="meta" id="metaBox" style="display:none">
+          <div><div class="k">昵称</div><div class="v" id="mName">-</div></div>
+          <div><div class="k">UID</div><div class="v" id="mUid">-</div></div>
+          <div><div class="k">今日已挑</div><div class="v" id="mQuota">-</div></div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="btnGen">扫码登录</button>
+          <button id="btnRefresh">刷新状态</button>
+        </div>
+        <div class="result" id="result"></div>
+      </div>
+
+      <div class="col" style="flex:none">
+        <div class="qrbox" id="qrbox">
+          <div class="placeholder">点「扫码登录」生成二维码</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tip">手机 B 站扫码后，确认时选 <b>「记住我 / 长期」</b>。选 24 小时的话明天就得重扫。</div>
+  </div>
+
+  <div class="card">
+    <h2>评论时 @ 谁</h2>
+    <div class="desc">从互关列表里选。勾了才会在评论末尾 @ 对方（按概率触发）</div>
+    <div class="actions" style="margin-top:0; margin-bottom:8px">
+      <button id="btnFollow">拉取互关列表</button>
+      <button id="btnSaveAt">保存选择</button>
+      <span class="state" style="margin-left:auto"><span id="atCount">已选 0 人</span></span>
+    </div>
+    <div class="list" id="followList">
+      <div class="placeholder">还没拉取。点上面的按钮。</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  var BASE = '/api/plug/astrbot_plugin_bili_scroll/';
+
+  var dot = document.getElementById('dot');
+  var loginText = document.getElementById('loginText');
+  var metaBox = document.getElementById('metaBox');
+  var mName = document.getElementById('mName');
+  var mUid = document.getElementById('mUid');
+  var mQuota = document.getElementById('mQuota');
+  var qrbox = document.getElementById('qrbox');
+  var result = document.getElementById('result');
+  var followList = document.getElementById('followList');
+  var atCount = document.getElementById('atCount');
+
+  var currentKey = '';
+  var timer = null;
+  var busy = false;
+  var selected = [];
+
+  function setDot(cls, text){
+    dot.className = 'dot' + (cls ? ' ' + cls : '');
+    loginText.textContent = text;
+  }
+
+  function showResult(text, ok){
+    result.textContent = text;
+    result.className = 'result ' + (ok ? 'ok' : 'err');
+  }
+
+  function hideResult(){ result.className = 'result'; result.textContent = ''; }
+
+  function api(path){
+    return fetch(BASE + path, { credentials: 'same-origin' }).then(function(r){ return r.json(); });
+  }
+
+  function refreshStatus(){
+    setDot('warn', '检查中…');
+    api('status').then(function(d){
+      if (!d.ok) { setDot('err', '状态获取失败'); return; }
+      if (d.logged_in) {
+        setDot('ok', '已登录');
+        metaBox.style.display = 'grid';
+        mName.textContent = d.name || '-';
+        mUid.textContent = d.uid || '-';
+        mQuota.textContent = (d.picked || 0) + '/' + (d.max_per_day || 0);
+        if (Array.isArray(d.at_users)) {
+          selected = d.at_users.slice();
+          updateCount();
+        }
+      } else {
+        setDot('err', '未登录');
+        metaBox.style.display = 'none';
+      }
+    }).catch(function(){ setDot('err', '网络错误'); });
+  }
+
+  function stopTimer(){ if (timer) { clearInterval(timer); timer = null; } }
+
+  function genQr(){
+    if (busy) return;
+    busy = true;
+    hideResult();
+    stopTimer();
+    setDot('warn', '生成二维码…');
+    qrbox.innerHTML = '<div class="placeholder">生成中…</div>';
+
+    api('qr').then(function(d){
+      if (!d.ok) throw new Error(d.error || '生成失败');
+      currentKey = d.key;
+      qrbox.innerHTML = '<img alt="二维码" src="data:image/png;base64,' + d.image + '">';
+      setDot('warn', '等待扫码');
+      dot.classList.add('pulse');
+      startPolling();
+    }).catch(function(e){
+      setDot('err', '生成失败');
+      qrbox.innerHTML = '<div class="placeholder">生成失败<br>' + e.message + '</div>';
+      showResult('生成失败：' + e.message, false);
+    }).finally(function(){ busy = false; });
+  }
+
+  function startPolling(){
+    stopTimer();
+    timer = setInterval(pollOnce, 2500);
+  }
+
+  function pollOnce(){
+    if (!currentKey || busy) return;
+    busy = true;
+    api('poll?key=' + encodeURIComponent(currentKey)).then(function(d){
+      if (!d.ok) return;
+      if (d.code === 0) {
+        stopTimer();
+        dot.classList.remove('pulse');
+        setDot('ok', '登录成功');
+        qrbox.innerHTML = '<div class="placeholder" style="color:#3ecf8e;font-size:15px">✓ 已登录</div>';
+        showResult('登录成功：' + (d.detail || '凭证已保存'), true);
+        refreshStatus();
+      } else if (d.code === 86090) {
+        setDot('warn', '已扫码，请在手机上确认');
+      } else if (d.code === 86038) {
+        stopTimer();
+        dot.classList.remove('pulse');
+        setDot('err', '二维码已过期');
+        showResult('二维码过期了，重新生成一个', false);
+      }
+    }).catch(function(){}).finally(function(){ busy = false; });
+  }
+
+  function loadFollowings(){
+    followList.innerHTML = '<div class="placeholder">拉取中…（可能要几秒）</div>';
+    api('followings').then(function(d){
+      if (!d.ok) throw new Error(d.error || '拉取失败');
+      var items = d.items || [];
+      if (!items.length) {
+        followList.innerHTML = '<div class="placeholder">没拉到关注列表，可能是 Cookie 失效或没有关注的人</div>';
+        return;
+      }
+      var html = '';
+      items.forEach(function(it){
+        var checked = selected.indexOf(it.uname) >= 0 ? ' checked' : '';
+        html += '<label class="item">'
+          + '<input type="checkbox" data-name="' + it.uname + '"' + checked + '>'
+          + '<span>' + it.uname + '</span>'
+          + (it.mutual ? '<span class="tag mutual">互关</span>' : '')
+          + '</label>';
+      });
+      followList.innerHTML = html;
+      bindChecks();
+    }).catch(function(e){
+      followList.innerHTML = '<div class="placeholder">拉取失败：' + e.message + '</div>';
+    });
+  }
+
+  function bindChecks(){
+    followList.querySelectorAll('input[type=checkbox]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        var name = cb.getAttribute('data-name');
+        if (cb.checked) {
+          if (selected.indexOf(name) < 0) selected.push(name);
+        } else {
+          selected = selected.filter(function(x){ return x !== name; });
+        }
+        updateCount();
+      });
+    });
+  }
+
+  function updateCount(){
+    atCount.textContent = '已选 ' + selected.length + ' 人';
+  }
+
+  function saveAt(){
+    var body = JSON.stringify({ at_users: selected });
+    fetch(BASE + 'at-users', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if (d.ok) showResult('已保存：' + (selected.length ? selected.join('、') : '（清空）'), true);
+      else showResult('保存失败：' + (d.error || ''), false);
+    }).catch(function(e){ showResult('保存失败：' + e.message, false); });
+  }
+
+  document.getElementById('btnGen').addEventListener('click', genQr);
+  document.getElementById('btnRefresh').addEventListener('click', refreshStatus);
+  document.getElementById('btnFollow').addEventListener('click', loadFollowings);
+  document.getElementById('btnSaveAt').addEventListener('click', saveAt);
+
+  refreshStatus();
+})();
+</script>
+</body>
+</html>

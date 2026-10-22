@@ -2,7 +2,14 @@
   "cookie": {
     "description": "B 站 Cookie",
     "type": "text",
-    "hint": "整串粘贴，含 SESSDATA 与 bili_jct。加密保存在插件数据目录。",
+    "hint": "推荐用左侧「刷B站」页面扫码登录，会自动写入这里。手动粘贴也行（含 SESSDATA 与 bili_jct）。",
+    "default": ""
+  },
+  "persona": {
+    "description": "使用哪个人设",
+    "type": "string",
+    "hint": "从 AstrBot 已有的人设卡里选。留空则用当前默认人设。",
+    "_special": "select_persona",
     "default": ""
   },
   "keywords": {
@@ -131,10 +138,34 @@
     "hint": "",
     "default": 1
   },
+  "comment_style_learning": {
+    "description": "学习评论区语言风格",
+    "type": "bool",
+    "hint": "发评论前先拉该视频的热评，归纳语气/梗/标点习惯，再按这个风格写。关掉就是通用语气。",
+    "default": true
+  },
+  "comment_style_sample_size": {
+    "description": "风格学习采样条数",
+    "type": "int",
+    "hint": "拉多少条热评来归纳风格，少于 5 条会放弃评论",
+    "default": 30
+  },
+  "comment_style_threshold": {
+    "description": "风格自检通过分数线",
+    "type": "float",
+    "hint": "0-1。生成后让模型自评「像不像这个评论区的人说的」，低于这个分就重写",
+    "default": 0.7
+  },
+  "comment_max_rewrites": {
+    "description": "评论最多重写几次",
+    "type": "int",
+    "hint": "用尽仍不达标就不发（宁可不评论）",
+    "default": 2
+  },
   "reply_enable": {
     "description": "回复楼中楼",
     "type": "bool",
-    "hint": "只回直接回在自己评论下、问插件用法的，一两句话能答清的",
+    "hint": "只回直接回在自己评论下的，聊视频内容或插件用法都行，一两句话能答清的才回",
     "default": false
   },
   "reply_max_per_round": {
@@ -142,6 +173,30 @@
     "type": "int",
     "hint": "",
     "default": 2
+  },
+  "reply_scope": {
+    "description": "回复范围",
+    "type": "string",
+    "hint": "related 聊视频内容或插件用法都回 / usage_only 只回插件用法",
+    "default": "related"
+  },
+  "at_enable": {
+    "description": "评论时 @ 指定用户",
+    "type": "bool",
+    "hint": "发评论时在末尾 @ 你选的人。需要先在「刷B站」页面拉互关列表选人。",
+    "default": false
+  },
+  "at_users": {
+    "description": "@ 谁",
+    "type": "list",
+    "hint": "填 B 站用户名（不带 @）。可以在「刷B站」页面从互关列表里勾选。",
+    "default": []
+  },
+  "at_probability": {
+    "description": "@ 的概率",
+    "type": "float",
+    "hint": "0-1。不是每条评论都 @，太高会像刷屏",
+    "default": 0.5
   },
   "affection_enable": {
     "description": "按好感度决定投币/点赞",
@@ -162,16 +217,18 @@
     "default": 60
   },
   "persona_source": {
-    "description": "人设来源",
+    "description": "人设来源（旧字段）",
     "type": "string",
-    "hint": "astrbot 读当前 persona / file 指定文件 / neutral 中性",
-    "default": "astrbot"
+    "hint": "已由上面的「使用哪个人设」取代。保留只为兼容：astrbot / file / neutral",
+    "default": "astrbot",
+    "invisible": true
   },
   "persona_file": {
     "description": "人设文件路径",
     "type": "string",
     "hint": "persona_source=file 时生效",
-    "default": ""
+    "default": "",
+    "invisible": true
   },
   "data_dir": {
     "description": "数据目录",

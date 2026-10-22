@@ -45,9 +45,21 @@ def is_usage_question(text: str) -> bool:
 
 
 def should_reply(
-    comment: Comment, *, require_usage: bool = True, max_len: int = REPLY_MAX_LEN
+    comment: Comment,
+    *,
+    scope: str = "related",
+    max_len: int = REPLY_MAX_LEN,
 ) -> tuple[bool, str]:
-    """三条铁律：1 直接回在我下面 2 问的是插件用法 3 一两句话能答清。"""
+    """判定要不要回。
+
+    三条底线：
+    1. 直接回在我那条评论下面
+    2. 不属于六类拒答（要代码/作品/承诺/吵架/隐私）
+    3. 一两句话能答清（长度可控）
+
+    scope=related（默认）：聊视频内容、聊话题、问插件用法都回。
+    scope=usage_only：只回问插件用法的。
+    """
     if not comment.is_direct_reply_to_me:
         return False, "not_direct"
 
@@ -55,9 +67,10 @@ def should_reply(
     if refused:
         return False, f"refused:{why}"
 
-    if require_usage and not is_usage_question(comment.content):
+    if scope == "usage_only" and not is_usage_question(comment.content):
         return False, "not_usage"
 
+    # 需要多轮才说得清的，不算「一两句话能答清」
     if len(comment.content) > 200:
         return False, "too_long_question"
 
@@ -74,6 +87,7 @@ async def run_reply_round(
     max_per_round: int = REPLY_MAX_PER_ROUND,
     max_len: int = REPLY_MAX_LEN,
     since_days: int = 7,
+    scope: str = "related",
 ) -> int:
     """返回本轮实际回复条数。"""
     replied = 0
@@ -104,7 +118,7 @@ async def run_reply_round(
 
         handled = False
         for c in replies:
-            ok, _why = should_reply(c, max_len=max_len)
+            ok, _why = should_reply(c, scope=scope, max_len=max_len)
             if not ok:
                 continue
 

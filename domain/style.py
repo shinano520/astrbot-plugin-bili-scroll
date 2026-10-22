@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from typing import Any
 
 from ..infra.logger import setup
@@ -40,6 +41,22 @@ def dedupe_bots(samples: list[str]) -> list[str]:
         out.append(text)
 
     return out
+
+
+def append_at(text: str, users: list[str], probability: float, max_at: int = 2) -> str:
+    """按概率在评论末尾追加 @。B 站靠纯文本识别，@后面要有空格。"""
+    if not text or not users or probability <= 0:
+        return text
+    if random.random() >= probability:
+        return text
+
+    clean = [u.strip().lstrip("@") for u in users if u and u.strip()]
+    if not clean:
+        return text
+
+    picked = random.sample(clean, min(len(clean), max_at))
+    ats = " ".join(f"@{u}" for u in picked)
+    return f"{text} {ats}"
 
 
 async def make_comment(

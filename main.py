@@ -29,7 +29,7 @@ from .domain.constants import (
 )
 from .domain.models import CheckResult, RoundCost, Video
 from .domain.reply import run_reply_round, verify_comments
-from .domain.style import make_comment
+from .domain.style import append_at, make_comment
 from .infra import qr_login
 from .infra.bili_client import BiliClient
 from .infra.crypto import CryptoError, load_cookie, load_or_create_key, save_cookie
@@ -45,6 +45,25 @@ PLUGIN_DIR = Path(__file__).parent
 DATA_DIR = PLUGIN_DIR / "data"
 
 log = setup("bili_scroll")
+
+
+def _extract_prompt(persona: Any) -> str:
+    """从不同形态的 persona 对象里取出系统提示词。"""
+    if persona is None:
+        return ""
+    if isinstance(persona, str):
+        return persona.strip()
+    if isinstance(persona, dict):
+        for key in ("prompt", "system_prompt", "text"):
+            value = persona.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    for attr in ("prompt", "system_prompt", "text"):
+        value = getattr(persona, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 class BiliScrollPlugin(Star):
@@ -163,6 +182,9 @@ class BiliScrollPlugin(Star):
             ("page", self.web.page, ["GET"], "B站扫码登录页"),
             ("qr", self.web.qr, ["GET"], "生成登录二维码"),
             ("poll", self.web.poll, ["GET"], "轮询扫码状态"),
+            ("status", self.web.status, ["GET"], "登录与配额状态"),
+            ("followings", self.web.followings, ["GET"], "拉互关列表"),
+            ("at-users", self.web.at_users, ["POST"], "保存 @ 名单"),
         )
         for endpoint, handler, methods, desc in routes:
             try:
@@ -211,33 +233,77 @@ class BiliScrollPlugin(Star):
         }
 
     async def _load_persona(self) -> str:
+        pm = getattr(self.context, "persona_manager", None)
+
+        # 1. 优先用配置里明确选的人设卡
+        picked = (self._get("persona") or "").strip()
+        if picked and pm is not None:
+            text = await self._persona_by_id(pm, picked)
+            if text:
+                log.info("使用人设卡：%s", picked)
+                return text
+
+        # 2. 回退：默认人设
+        if pm is not None:
+            for name in ("get_default_persona_v3", "get_default_persona"):
+                fn = getattr(pm, name, None)
+                if fn is None:
+                    continue
+                try:
+                    persona = fn()
+                    if asyncio.iscoroutine(persona):
+                        persona = await persona
+                    text = _extract_prompt(persona)
+                    if text:
+                        log.info("使用默认人设（%s）", name)
+                        return text
+                except Exception as e:
+                    log.debug("读默认人设失败 %s: %s", name, e)
+
+        # 3. 再看旧字段
         source = (self._get("persona_source") or "astrbot").strip()
-        if source == "neutral":
-            return NEUTRAL_PERSONA
         if source == "file":
             path = self._get("persona_file") or ""
             try:
                 return Path(path).read_text(encoding="utf-8").strip() or NEUTRAL_PERSONA
             except Exception as e:
                 log.info("读人设文件失败，走中性：%s", e)
-                return NEUTRAL_PERSONA
-        try:
-            pm = getattr(self.context, "persona_manager", None)
-            if pm is not None:
-                persona = None
-                if hasattr(pm, "get_default_persona_v3"):
-                    persona = pm.get_default_persona_v3()
-                    if asyncio.iscoroutine(persona):
-                        persona = await persona
-                if isinstance(persona, dict):
-                    prompt = persona.get("prompt") or persona.get("system_prompt") or ""
-                    if prompt.strip():
-                        return prompt.strip()
-                elif isinstance(persona, str) and persona.strip():
-                    return persona.strip()
-        except Exception as e:
-            log.info("读 persona 失败，走中性：%s", e)
         return NEUTRAL_PERSONA
+
+    async def _persona_by_id(self, pm: Any, persona_id: str) -> str:
+        """按 id 找人设，兼容不同版本的 AstrBot。"""
+        for name in ("get_persona_v3", "get_persona"):
+            fn = getattr(pm, name, None)
+            if fn is None:
+                continue
+            try:
+                persona = fn(persona_id)
+                if asyncio.iscoroutine(persona):
+                    persona = await persona
+                text = _extract_prompt(persona)
+                if text:
+                    return text
+            except Exception:
+                continue
+
+        # 兜底：遍历列表自己找
+        for name in ("get_all_personas_v3", "get_all_personas", "personas"):
+            try:
+                value = getattr(pm, name, None)
+                personas = value() if callable(value) else value
+                if asyncio.iscoroutine(personas):
+                    personas = await personas
+                for item in personas or []:
+                    target_id = getattr(item, "persona_id", None) or (
+                        item.get("persona_id") if isinstance(item, dict) else None
+                    )
+                    if str(target_id) == str(persona_id):
+                        text = _extract_prompt(item)
+                        if text:
+                            return text
+            except Exception:
+                continue
+        return ""
 
     # ── 指令 ──────────────────────────────────────────────────
     @filter.command(CMD_ROOT)
@@ -448,6 +514,7 @@ class BiliScrollPlugin(Star):
                     store=self.store,
                     umo=umo,
                     max_per_round=int(self._num("reply_max_per_round", REPLY_MAX_PER_ROUND)),
+                    scope=str(self._get("reply_scope") or "related"),
                 )
 
             summary = (
@@ -506,10 +573,23 @@ class BiliScrollPlugin(Star):
             if video is None:
                 continue
             text = await make_comment(
-                video, bili=self.bili, llm=self.llm, reason=v.reason, umo=umo
+                video,
+                bili=self.bili,
+                llm=self.llm,
+                reason=v.reason,
+                umo=umo,
+                max_rewrites=int(self._num("comment_max_rewrites", 2)),
+                threshold=self._num("comment_style_threshold", 0.7),
+                sample_size=int(self._num("comment_style_sample_size", 30)),
             )
             if not text:
                 continue
+
+            # 按概率 @ 指定用户
+            if self._flag("at_enable", False):
+                users = list(self._get("at_users") or [])
+                text = append_at(text, users, self._num("at_probability", 0.5))
+
             try:
                 rpid, root = await self.bili.post_comment(video.bvid, text)
                 await self.store.save_own_comment(rpid, root, video.bvid, text)

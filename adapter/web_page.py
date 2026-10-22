@@ -1,4 +1,7 @@
-"""WebUI 扫码登录页。注册在 AstrBot 的 /api 下，沿用后台登录态。"""
+"""WebUI 端点：扫码登录页、二维码、轮询、状态、互关列表、@ 名单。
+
+左侧菜单页面在 views/bili_scroll/index.html，调用这里的接口。
+"""
 
 from __future__ import annotations
 
@@ -37,26 +40,19 @@ PAGE_HTML = """<!DOCTYPE html>
   .sub{color:var(--sub); font-size:13px; margin-bottom:20px}
   .qrbox{
     display:flex; align-items:center; justify-content:center;
-    min-height:260px; background:#fff; border-radius:12px; padding:16px; position:relative;
+    min-height:260px; background:#fff; border-radius:12px; padding:16px;
   }
   .qrbox img{width:228px; height:228px; image-rendering:pixelated; display:block}
   .placeholder{color:#888; font-size:13px; text-align:center; padding:40px 12px}
-  .status{
-    display:flex; align-items:center; gap:8px; margin-top:16px;
-    font-size:13px; color:var(--sub); min-height:22px;
-  }
+  .status{display:flex; align-items:center; gap:8px; margin-top:16px; font-size:13px; color:var(--sub); min-height:22px}
   .dot{width:8px; height:8px; border-radius:50%; background:var(--sub); flex:none}
   .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
   .dot.pulse{animation:pulse 1.2s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
   .actions{display:flex; gap:10px; margin-top:18px}
-  button{
-    flex:1; padding:10px 14px; border-radius:10px; border:1px solid var(--line);
-    background:#22262f; color:var(--text); font-size:13px; cursor:pointer; transition:.15s;
-  }
+  button{flex:1; padding:10px 14px; border-radius:10px; border:1px solid var(--line); background:#22262f; color:var(--text); font-size:13px; cursor:pointer; transition:.15s}
   button:hover:not(:disabled){background:#2a2f3a; border-color:#39404d}
   button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
-  button.primary:hover:not(:disabled){background:#3d7aec}
   button:disabled{opacity:.45; cursor:not-allowed}
   .tip{margin-top:16px; font-size:12px; color:var(--sub); line-height:1.7}
   .tip b{color:var(--warn)}
@@ -69,125 +65,59 @@ PAGE_HTML = """<!DOCTYPE html>
 <div class="card">
   <h1>扫码登录 B 站</h1>
   <div class="sub">登录后插件才能搜索、读字幕、发评论</div>
-
-  <div class="qrbox" id="qrbox">
-    <div class="placeholder">点下面的按钮生成二维码</div>
-  </div>
-
+  <div class="qrbox" id="qrbox"><div class="placeholder">点下面的按钮生成二维码</div></div>
   <div class="status"><span class="dot" id="dot"></span><span id="statusText">未开始</span></div>
-
   <div class="actions">
     <button class="primary" id="btnGen">生成二维码</button>
-    <button id="btnCheck" disabled>我已扫码，查状态</button>
+    <button id="btnCheck" disabled>查状态</button>
   </div>
-
   <div class="result" id="result"></div>
-
-  <div class="tip">
-    手机 B 站扫码后，确认时请选 <b>「记住我 / 长期」</b>。
-    选 24 小时的话明天就得重扫。
-  </div>
+  <div class="tip">手机 B 站扫码后，确认时请选 <b>「记住我 / 长期」</b>。选 24 小时的话明天就得重扫。</div>
 </div>
-
 <script>
 (function(){
-  var btnGen = document.getElementById('btnGen');
-  var btnCheck = document.getElementById('btnCheck');
-  var qrbox = document.getElementById('qrbox');
-  var dot = document.getElementById('dot');
-  var statusText = document.getElementById('statusText');
-  var result = document.getElementById('result');
-
-  var currentKey = '';
-  var timer = null;
-  var polling = false;
-
-  var BASE = '/api/astrbot_plugin_bili_scroll/';
-
-  function setStatus(text, cls, pulse){
-    statusText.textContent = text;
-    dot.className = 'dot' + (cls ? ' ' + cls : '') + (pulse ? ' pulse' : '');
-  }
-
-  function showResult(text, ok){
-    result.textContent = text;
-    result.className = 'result ' + (ok ? 'ok' : 'err');
-  }
-
-  function hideResult(){
-    result.className = 'result';
-    result.textContent = '';
-  }
-
-  function stopTimer(){
-    if (timer) { clearInterval(timer); timer = null; }
-  }
-
+  var BASE = '/api/plug/astrbot_plugin_bili_scroll/';
+  var btnGen=document.getElementById('btnGen'), btnCheck=document.getElementById('btnCheck');
+  var qrbox=document.getElementById('qrbox'), dot=document.getElementById('dot');
+  var statusText=document.getElementById('statusText'), result=document.getElementById('result');
+  var currentKey='', timer=null, polling=false;
+  function setStatus(t,c,p){ statusText.textContent=t; dot.className='dot'+(c?' '+c:'')+(p?' pulse':''); }
+  function showResult(t,ok){ result.textContent=t; result.className='result '+(ok?'ok':'err'); }
+  function hideResult(){ result.className='result'; result.textContent=''; }
+  function stopTimer(){ if(timer){clearInterval(timer);timer=null;} }
+  function api(p){ return fetch(BASE+p,{credentials:'same-origin'}).then(function(r){return r.json();}); }
   function genQr(){
-    stopTimer();
-    hideResult();
-    btnGen.disabled = true;
-    btnCheck.disabled = true;
-    setStatus('正在生成…', 'warn', true);
-    qrbox.innerHTML = '<div class="placeholder">生成中…</div>';
-
-    fetch(BASE + 'qr', { credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if (!d.ok) { throw new Error(d.error || '生成失败'); }
-        currentKey = d.key;
-        qrbox.innerHTML = '<img alt="二维码" src="data:image/png;base64,' + d.image + '">';
-        setStatus('等待扫码', 'warn', true);
-        btnCheck.disabled = false;
-        startPolling();
-      })
-      .catch(function(e){
-        setStatus('生成失败', 'err');
-        qrbox.innerHTML = '<div class="placeholder">生成失败<br>' + e.message + '</div>';
-        showResult('生成失败：' + e.message, false);
-      })
-      .finally(function(){ btnGen.disabled = false; });
+    stopTimer(); hideResult(); btnGen.disabled=true; btnCheck.disabled=true;
+    setStatus('正在生成…','warn',true);
+    qrbox.innerHTML='<div class="placeholder">生成中…</div>';
+    api('qr').then(function(d){
+      if(!d.ok) throw new Error(d.error||'生成失败');
+      currentKey=d.key;
+      qrbox.innerHTML='<img alt="二维码" src="data:image/png;base64,'+d.image+'">';
+      setStatus('等待扫码','warn',true); btnCheck.disabled=false; startPolling();
+    }).catch(function(e){
+      setStatus('生成失败','err');
+      qrbox.innerHTML='<div class="placeholder">生成失败<br>'+e.message+'</div>';
+      showResult('生成失败：'+e.message,false);
+    }).finally(function(){ btnGen.disabled=false; });
   }
-
-  function startPolling(){
-    stopTimer();
-    timer = setInterval(checkOnce, 2500);
-  }
-
+  function startPolling(){ stopTimer(); timer=setInterval(checkOnce,2500); }
   function checkOnce(){
-    if (!currentKey || polling) { return; }
-    polling = true;
-    fetch(BASE + 'poll?key=' + encodeURIComponent(currentKey), { credentials: 'same-origin' })
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if (!d.ok) { return; }
-        var code = d.code;
-        if (code === 0) {
-          stopTimer();
-          setStatus('登录成功', 'ok');
-          btnCheck.disabled = true;
-          showResult('登录成功：' + (d.detail || '已保存凭证'), true);
-          qrbox.innerHTML = '<div class="placeholder" style="color:#3ecf8e;font-size:15px">✓ 登录成功</div>';
-        } else if (code === 86090) {
-          setStatus('已扫码，请在手机上确认', 'warn', true);
-        } else if (code === 86038) {
-          stopTimer();
-          setStatus('二维码已过期', 'err');
-          btnCheck.disabled = true;
-          showResult('二维码过期了，重新生成一个', false);
-        } else {
-          setStatus('等待扫码…', 'warn', true);
-        }
-      })
-      .catch(function(){})
-      .finally(function(){ polling = false; });
+    if(!currentKey||polling) return;
+    polling=true;
+    api('poll?key='+encodeURIComponent(currentKey)).then(function(d){
+      if(!d.ok) return;
+      if(d.code===0){
+        stopTimer(); setStatus('登录成功','ok'); btnCheck.disabled=true;
+        showResult('登录成功：'+(d.detail||'已保存凭证'),true);
+        qrbox.innerHTML='<div class="placeholder" style="color:#3ecf8e;font-size:15px">✓ 登录成功</div>';
+      } else if(d.code===86090){ setStatus('已扫码，请在手机上确认','warn',true); }
+      else if(d.code===86038){ stopTimer(); setStatus('二维码已过期','err'); btnCheck.disabled=true; showResult('二维码过期了，重新生成一个',false); }
+      else { setStatus('等待扫码…','warn',true); }
+    }).catch(function(){}).finally(function(){ polling=false; });
   }
-
-  btnGen.addEventListener('click', genQr);
-  btnCheck.addEventListener('click', function(){
-    setStatus('查询中…', 'warn', true);
-    checkOnce();
-  });
+  btnGen.addEventListener('click',genQr);
+  btnCheck.addEventListener('click',function(){ setStatus('查询中…','warn',true); checkOnce(); });
 })();
 </script>
 </body>
@@ -196,12 +126,13 @@ PAGE_HTML = """<!DOCTYPE html>
 
 
 class WebPage:
-    """三个端点：page / qr / poll。全部走 AstrBot 的登录态。"""
+    """所有端点都走 AstrBot 后台登录态。"""
 
     def __init__(self, plugin: Any):
         self.plugin = plugin
         self._pending: dict[str, str] = {}
 
+    # ── 页面 ──────────────────────────────────────────────────
     async def page(self):
         try:
             from quart import Response
@@ -211,6 +142,7 @@ class WebPage:
             log.info("返回页面失败：%s", e)
             return PAGE_HTML
 
+    # ── 二维码 ────────────────────────────────────────────────
     async def qr(self):
         try:
             from quart import jsonify
@@ -241,7 +173,6 @@ class WebPage:
             payload = {"ok": False, "error": "missing key"}
             return jsonify(payload) if jsonify else payload
 
-        # 已经登录过且 key 不在待处理里：直接回报成功
         if key not in self._pending:
             payload = {"ok": True, "code": 86038, "detail": ""}
             return jsonify(payload) if jsonify else payload
@@ -249,7 +180,6 @@ class WebPage:
         try:
             code, cookie = await qr_login.poll_once(key)
         except Exception as e:
-            log.info("轮询失败：%s", e)
             payload = {"ok": False, "error": truncate(str(e))}
             return jsonify(payload) if jsonify else payload
 
@@ -270,4 +200,74 @@ class WebPage:
             self._pending.pop(key, None)
 
         payload = {"ok": True, "code": code, "detail": detail}
+        return jsonify(payload) if jsonify else payload
+
+    # ── 状态 ──────────────────────────────────────────────────
+    async def status(self):
+        try:
+            from quart import jsonify
+        except Exception:
+            jsonify = None
+
+        payload: dict = {"ok": True, "logged_in": False}
+        try:
+            logged_in = bool(self.plugin.bili and self.plugin.bili.uid)
+            payload["logged_in"] = logged_in
+
+            if logged_in:
+                check = await self.plugin.bili.check_login()
+                payload["logged_in"] = check.ok
+                payload["name"] = check.detail if check.ok else ""
+                payload["uid"] = self.plugin.bili.uid
+
+            picked, rounds = await self.plugin.store.quota_today()
+            payload["picked"] = picked
+            payload["rounds"] = rounds
+            payload["max_per_day"] = int(self.plugin._num("max_per_day", 5))
+            payload["at_users"] = list(self.plugin._get("at_users") or [])
+        except Exception as e:
+            payload = {"ok": False, "error": truncate(str(e))}
+
+        return jsonify(payload) if jsonify else payload
+
+    # ── 互关列表 ──────────────────────────────────────────────
+    async def followings(self):
+        try:
+            from quart import jsonify
+        except Exception:
+            jsonify = None
+
+        try:
+            if not self.plugin.bili or not self.plugin.bili.uid:
+                payload = {"ok": False, "error": "还没登录"}
+            else:
+                items = await self.plugin.bili.get_followings(limit=100)
+                payload = {"ok": True, "items": items}
+        except Exception as e:
+            payload = {"ok": False, "error": truncate(str(e))}
+
+        return jsonify(payload) if jsonify else payload
+
+    # ── 保存 @ 名单 ───────────────────────────────────────────
+    async def at_users(self):
+        try:
+            from quart import jsonify, request
+
+            body = await request.get_json(silent=True) or {}
+            users = body.get("at_users") or []
+            if not isinstance(users, list):
+                users = []
+            clean = [str(u).strip() for u in users if str(u).strip()]
+
+            self.plugin.cfg["at_users"] = clean
+            save = getattr(self.plugin.cfg, "save_config", None)
+            if callable(save):
+                save()
+
+            log.info("已更新 @ 名单：%s", clean)
+            payload = {"ok": True, "at_users": clean}
+        except Exception as e:
+            payload = {"ok": False, "error": truncate(str(e))}
+            jsonify = None
+
         return jsonify(payload) if jsonify else payload

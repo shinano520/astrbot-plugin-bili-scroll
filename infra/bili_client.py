@@ -28,6 +28,7 @@ UA = (
 REFERER = "https://www.bilibili.com/"
 SUB_REPLY_URL = "https://api.bilibili.com/x/v2/reply/reply"
 REPLY_LIST_URL = "https://api.bilibili.com/x/v2/reply/wbi/main"
+FOLLOWINGS_URL = "https://api.bilibili.com/x/relation/followings"
 
 
 class BiliError(Exception):
@@ -327,6 +328,46 @@ class BiliClient:
             return True
         except Exception:
             return False
+
+    async def get_followings(self, limit: int = 100) -> list[dict]:
+        """拉自己关注的人。返回 [{mid, uname, mutual}]，mutual 表示是否互关。"""
+        if not self.uid:
+            return []
+        session = await self._get_session()
+        out: list[dict] = []
+        page = 1
+        while len(out) < limit and page <= 5:
+            await self._throttle()
+            params = {"vmid": self.uid, "pn": page, "ps": 50, "order": "desc"}
+            try:
+                async with session.get(FOLLOWINGS_URL, params=params) as resp:
+                    if resp.status != 200:
+                        break
+                    payload = await resp.json(content_type=None)
+            except Exception:
+                break
+
+            if (payload or {}).get("code") != 0:
+                break
+
+            data = payload.get("data") or {}
+            items = data.get("list") or []
+            if not items:
+                break
+
+            for it in items:
+                attribute = int(it.get("attribute") or 0)
+                out.append(
+                    {
+                        "mid": str(it.get("mid") or ""),
+                        "uname": it.get("uname") or "",
+                        "mutual": attribute == 2,
+                    }
+                )
+                if len(out) >= limit:
+                    break
+            page += 1
+        return out
 
     async def get_audio_url(self, bvid: str) -> str:
         await self._throttle()
