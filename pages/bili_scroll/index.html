@@ -297,7 +297,15 @@
   }
   function hideResult(){ if (result) { result.className = 'result'; result.textContent = ''; } }
   function stopTimer(){ if (timer) { clearInterval(timer); timer = null; } }
-  function updateCount(){ if (atCount) atCount.textContent = '已选 ' + selected.length + ' 人'; }
+  function updateCount(){
+    if (!atCount) return;
+    if (!selected.length) { atCount.textContent = '未选择'; return; }
+    if (selected.length <= 4) {
+      atCount.textContent = '已选 ' + selected.length + ' 人：' + selected.join('、');
+    } else {
+      atCount.textContent = '已选 ' + selected.length + ' 人：' + selected.slice(0, 4).join('、') + ' 等';
+    }
+  }
 
   function refreshStatus(){
     setDot('warn', '检查中…');
@@ -464,6 +472,12 @@
           + '</label>';
       });
       followList.innerHTML = html;
+      // 已选但不在关注列表里的（历史残留）单独提示
+      var names = items.map(function(x){ return x.uname; });
+      var orphan = selected.filter(function(x){ return names.indexOf(x) < 0; });
+      if (orphan.length) {
+        showResult('注意：这些已选名字不在关注列表里，可能是残留 —— ' + orphan.join('、') + '（可取消勾选后保存清掉）', false);
+      }
       followList.querySelectorAll('input[type=checkbox]').forEach(function(cb){
         cb.addEventListener('change', function(){
           var name = cb.getAttribute('data-name');
@@ -479,8 +493,12 @@
 
   function saveAt(){
     apiPost('/at-users', { at_users: selected }).then(function(d){
-      if (d && d.ok) showResult('已保存：' + (selected.length ? selected.join('、') : '（清空）'), true);
-      else showResult('保存失败：' + ((d && d.error) || ''), false);
+      if (d && d.ok) {
+        if (Array.isArray(d.at_users)) { selected = d.at_users.slice(); updateCount(); }
+        showResult('已保存到配置：' + (selected.length ? selected.join('、') : '（清空）'), true);
+      } else {
+        showResult('保存失败：' + ((d && d.error) || ''), false);
+      }
     }).catch(function(e){ showResult('保存失败：' + (e && e.message || e), false); });
   }
 
