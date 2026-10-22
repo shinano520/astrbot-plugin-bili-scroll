@@ -369,6 +369,27 @@
     }).catch(function(e){ setDot('err', '请求失败'); });
   }
 
+  function runOnce(){
+    var ok = true;
+    try { ok = window.confirm('跑一轮会真的搜索 + 判读（不发评论、不推送）。\n\n确定要跑吗？'); } catch(e) { ok = true; }
+    if (!ok) return;
+    var b = document.getElementById('btnRun');
+    if (b) { b.disabled = true; b.textContent = '跑着…'; }
+    try { toast('已开始，约 1-3 分钟', true); } catch(e) {}
+    try { showResult('已开始跑一轮（dry-run）。跑完点「刷新状态」看今日已挑。', true); } catch(e) {}
+    apiPost('run', { dry: true }).then(function(d){
+      if (!d || !d.ok) {
+        try { toast('启动失败', false); } catch(e) {}
+        try { showResult('启动失败：' + ((d && d.error) || ''), false); } catch(e) {}
+      }
+    }).catch(function(e){
+      try { toast('启动失败', false); } catch(e2) {}
+      try { showResult('启动失败：' + (e && e.message || e), false); } catch(e2) {}
+    }).finally(function(){
+      if (b) { b.disabled = false; b.textContent = '测跑一轮'; }
+    });
+  }
+
   function genQr(){
     if (busy) return;
     busy = true; hideResult(); stopTimer();
@@ -572,7 +593,7 @@
 
     if (!dot.__bound) {
       document.getElementById('btnGen').addEventListener('click', genQr);
-    document.getElementById('btnRun').addEventListener('click', runOnce);
+      document.getElementById('btnRun').addEventListener('click', runOnce);
       document.getElementById('btnRefresh').addEventListener('click', refreshStatus);
       document.getElementById('btnFollow').addEventListener('click', loadFollowings);
       document.getElementById('btnSaveAt').addEventListener('click', saveAt);
