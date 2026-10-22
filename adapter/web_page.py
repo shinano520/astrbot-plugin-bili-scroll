@@ -20,7 +20,7 @@ log = setup("bili_scroll.web")
 CONFIG_GROUPS: list[tuple[str, list[str]]] = [
     (
         "基础",
-        ["cookie", "persona", "admin_username", "admin_password", "keywords",
+        ["cookie", "persona", "keywords",
          "search_days", "max_per_day", "quota_per_round", "report_detail"],
     ),
     (
@@ -59,8 +59,6 @@ ENUM_FIELDS = {
 FIELD_LABELS = {
     "cookie": "B 站 Cookie",
     "persona": "使用哪个人设",
-    "admin_username": "后台账号",
-    "admin_password": "后台密码",
     "keywords": "关注关键词",
     "search_days": "搜索最近几天",
     "max_per_day": "每天最多挑几条",
@@ -389,8 +387,15 @@ class WebPage:
                     meta = schema.get(key, {}) or {}
                     value = self.plugin._get(key, meta.get("default"))
                     ftype = meta.get("type", "string")
+                    options = list(ENUM_FIELDS.get(key, []))
+
                     if key in ENUM_FIELDS:
                         ftype = "enum"
+                    if key == "persona":
+                        # 人设：从 AstrBot 现有人设卡里选
+                        ftype = "enum"
+                        options = [""] + [p["id"] for p in await self._list_personas()]
+
                     fields.append(
                         {
                             "key": key,
@@ -398,7 +403,7 @@ class WebPage:
                             "hint": meta.get("hint", ""),
                             "type": ftype,
                             "value": _normalize(value, ftype),
-                            "options": ENUM_FIELDS.get(key, []),
+                            "options": options,
                         }
                     )
                 groups.append({"title": title, "fields": fields})
@@ -452,6 +457,35 @@ class WebPage:
         return jsonify(payload) if jsonify else payload
 
     # ── 人设列表 ──────────────────────────────────────────────
+    async def _list_personas(self) -> list[dict]:
+        """拿 AstrBot 现有人设卡（id + name）。"""
+        items: list[dict] = []
+        try:
+            pm = getattr(self.plugin.context, "persona_manager", None)
+            if pm is None:
+                return items
+            for name in ("get_all_personas_v3", "get_all_personas"):
+                fn = getattr(pm, name, None)
+                if fn is None:
+                    continue
+                personas = fn()
+                if hasattr(personas, "__await__"):
+                    personas = await personas
+                for p in personas or []:
+                    pid = getattr(p, "persona_id", None) or (
+                        p.get("persona_id") if isinstance(p, dict) else None
+                    )
+                    pname = getattr(p, "name", None) or (
+                        p.get("name") if isinstance(p, dict) else None
+                    )
+                    if pid:
+                        items.append({"id": str(pid), "name": str(pname or pid)})
+                if items:
+                    break
+        except Exception as e:
+            log.info("读人设列表失败：%s", e)
+        return items
+
     async def personas(self):
         try:
             from quart import jsonify

@@ -12,23 +12,17 @@
     "_special": "select_persona",
     "default": ""
   },
-  "admin_username": {
-    "description": "后台账号",
-    "type": "string",
-    "hint": "「刷B站」面板自动登录用。填 AstrBot 后台的用户名，面板就不用每次手输。",
-    "default": "astrbot"
-  },
-  "admin_password": {
-    "description": "后台密码",
-    "type": "string",
-    "hint": "「刷B站」面板自动登录用。仅存在本机插件配置里，不上传任何地方。",
-    "default": ""
-  },
   "keywords": {
     "description": "关注关键词",
     "type": "list",
     "hint": "一行一个，留空用内置默认",
-    "default": ["AI", "编程", "科技", "游戏开发", "开源"]
+    "default": [
+      "AI",
+      "编程",
+      "科技",
+      "游戏开发",
+      "开源"
+    ]
   },
   "search_days": {
     "description": "搜索最近几天的视频",
@@ -64,7 +58,10 @@
     "description": "允许执行的时间窗",
     "type": "list",
     "hint": "格式 HH:MM-HH:MM，支持跨零点",
-    "default": ["12:00-14:00", "18:00-09:00"]
+    "default": [
+      "12:00-14:00",
+      "18:00-09:00"
+    ]
   },
   "schedule_jitter_minutes": {
     "description": "时段内随机抖动（分钟）",
@@ -118,13 +115,19 @@
     "description": "订阅触发短语",
     "type": "list",
     "hint": "用户发这些话就进入推送名单",
-    "default": ["大肥鱼给我发b站的视频", "订阅b站视频"]
+    "default": [
+      "大肥鱼给我发b站的视频",
+      "订阅b站视频"
+    ]
   },
   "opt_out_phrases": {
     "description": "退订触发短语",
     "type": "list",
     "hint": "用户发这些话立即停止推送",
-    "default": ["别发了", "取消订阅"]
+    "default": [
+      "别发了",
+      "取消订阅"
+    ]
   },
   "transcribe_enable": {
     "description": "本地转写无字幕视频",
