@@ -430,17 +430,37 @@ class ProfileStore(Protocol):
 
 ### 9.1 Cookie 加密
 
+**不用机器指纹**——它有平台分支（Linux `/etc/machine-id`、Windows 注册表 `MachineGuid`、macOS `ioreg`），为跨平台只增加复杂度。改用**随机密钥文件**：
+
 ```python
-def derive_key(machine_id: str) -> bytes:
-    return hashlib.scrypt(machine_id.encode(), salt=b"bili-scroll",
-                          n=2**14, r=8, p=1, dklen=32)
+from cryptography.fernet import Fernet
+import os
+
+KEY_FILE = DATA_DIR / "secret.key"
+
+def load_or_create_key() -> bytes:
+    if KEY_FILE.exists():
+        return KEY_FILE.read_bytes()
+    key = Fernet.generate_key()
+    KEY_FILE.write_bytes(key)
+    os.chmod(KEY_FILE, 0o600)      # Windows 上是 no-op，不报错
+    return key
 
 def encrypt(cookie: str, key: bytes) -> bytes:
-    return Fernet(base64.urlsafe_b64encode(key)).encrypt(cookie.encode())
+    return Fernet(key).encrypt(cookie.encode())
+
+def decrypt(blob: bytes, key: bytes) -> str:
+    return Fernet(key).decrypt(blob).decode()
 ```
 
-- 密钥派生自机器指纹，换机需重新导入
-- 文件权限 `0o600`
+| 项 | 说明 |
+| --- | --- |
+| 密钥来源 | `Fernet.generate_key()`，32 字节随机 |
+| 存放 | `<数据目录>/secret.key`，权限 `0600` |
+| 换机 | 密钥跟数据目录走，复制即可用 |
+| 丢失 | Cookie 需重新导入，不阻塞插件启动 |
+
+**威胁模型**：防「数据目录被备份 / 泄露」，不防「宿主机被完全控制」。
 
 ### 9.2 提示注入防护
 
@@ -478,6 +498,23 @@ HARD_LIMITS = {
 
 - 插件代码中不出现 `bind` / `listen` / `HTTPServer` / `uvicorn`
 - CI 加检查：`grep -rn "\.bind\|listen(" --include="*.py" . | grep -v tests` 必须为空
+
+### 9.5 跨平台策略
+
+**不做 Linux / Windows 双版本**，一份代码跨平台。
+
+| 项 | 处理 |
+| --- | --- |
+| 路径 | 全部用 `pathlib.Path`，不拼字符串、不写死 `/opt` |
+| 文件权限 | `os.chmod(0o600)` 在 Windows 上是 no-op，不抛错 |
+| 系统调用 | 不使用 `subprocess` 调系统命令 |
+| 密钥 | 随机文件，不读机器指纹（见 §9.1） |
+| 定时 | asyncio，不依赖 cron |
+| 依赖 | 全部有跨平台 wheel，无需编译 |
+
+**验证策略**：M1–M7 只在 Linux 容器验证；Windows 作为顺带兼容，不做独立测试矩阵。
+
+**唯一注意**：SQLite 的 WAL 模式在部分 Windows 网络盘上会失效，数据目录必须在本地磁盘。
 
 ---
 
