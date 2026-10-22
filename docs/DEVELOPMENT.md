@@ -542,6 +542,121 @@ REPLY_PROMPT = """
 
 默认关，开启后每轮最多 2 条回复。
 
+### 4.9 指令处理（`adapter/commands.py`）
+
+#### 4.9.1 指令清单
+
+| 指令 | 作用 | 权限 |
+| --- | --- | --- |
+| `/bili 跑` | 立刻跑一轮 | 管理员 |
+| `/bili 报告` | 看今天的报告 | 任何人 |
+| `/bili 停` | 停掉正在跑的一轮 | 管理员 |
+| `/bili 自检` | 检查四项可用性 | 管理员 |
+| `/bili 状态` | 配额 / 下次执行 / token | 任何人 |
+| `/bili 订阅` | opt-in | 任何人 |
+| `/bili 退订` | opt-out | 任何人 |
+
+```python
+@filter.command("bili")
+async def bili_cmd(self, event: AstrMessageEvent):
+    sub = (event.message_str or "").strip()
+    handler = self.ROUTES.get(sub)
+    if not handler:
+        yield event.plain_result("用法：/bili 跑|报告|停|自检|状态|订阅|退订")
+        return
+    async for r in handler(event):
+        yield r
+```
+
+#### 4.9.2 自检（`/bili 自检`）
+
+```python
+async def self_check(bili, llm) -> list[CheckResult]:
+    return [
+        await check_cookie(bili),      # 拉一次用户信息
+        await check_search(bili),      # 搜一个关键词，返回前 3 条
+        await check_subtitle(bili),    # 抽一条看有无字幕
+        await check_llm(llm),          # 最小请求
+    ]
+```
+
+输出每项 ✅/❌ + 具体原因。
+
+#### 4.9.3 停止本轮（`/bili 停`）
+
+```python
+@dataclass
+class RoundContext:
+    cancel: asyncio.Event
+
+async def run_round(ctx: RoundContext, ...):
+    for v in videos:
+        if ctx.cancel.is_set():
+            logger.info("本轮被手动停止，已完成 %d 条", done)
+            break
+        await process(v)
+```
+
+**限制**：已发出的评论/推送无法撤回，停止只影响后续步骤。报告里写明「本轮被手动停止」。
+
+#### 4.9.4 人设读取（`runtime.persona_source`）
+
+```python
+def load_persona(cfg) -> str:
+    if cfg.persona_source == "astrbot":
+        return read_current_astrbot_persona() or NEUTRAL    
+    if cfg.persona_source == "file":
+        return Path(cfg.persona_file).read_text()
+    return NEUTRAL
+```
+
+读不到就走中性，不猜。
+
+### 4.10 重试与记账
+
+#### 4.10.1 重试
+
+```python
+async def with_retry(fn, max_retry=2, backoff=(10, 60)):
+    for i in range(max_retry + 1):
+        try:
+            return await fn()
+        except RetryableError as e:
+            if i == max_retry:
+                raise
+            await asyncio.sleep(backoff[min(i, len(backoff) - 1)])
+```
+
+**可重试**：网络超时、5xx、LLM 超时。
+**不可重试**：Cookie 失效、412 风控、参数错误。
+
+#### 4.10.2 记账
+
+```python
+@dataclass
+class RoundCost:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    llm_calls: int = 0
+    api_calls: int = 0
+    estimated_cost: float = 0.0
+```
+
+**输出**：日报尾行 + `/bili 状态`。
+
+#### 4.10.3 日报三档
+
+```python
+def render_report(verdicts, cost, detail: str) -> str | None:
+    if detail == "none":
+        return None                    # 不写报告
+    if detail == "brief":
+        return "\n".join(f"- [{v.bvid}] {v.title}" for v in verdicts)
+    return render_full(verdicts, cost)  # 完整版
+```
+
+**`none` 档仍要写判重表和推送日志**，只是不生成 Markdown。
+
 ---
 
 ## 5. 接口抽象
@@ -662,6 +777,23 @@ class ProfileStore(Protocol):
 36. 复核查不到 → 记 `-1`，报告措辞必须是「没查到」
 37. 每轮回复数达上限 → 停止
 38. 楼中楼内含「忽略设定」等注入文本 → 不执行，仅当素材
+
+**指令与运行**
+39. `/bili 停` 后循环在下一个 await 点退出，已完成部分落盘
+40. 自检四项任一失败 → 报告写明是哪一项
+41. 日报 `none` 档 → 不生成 md，但判重表与推送日志有记录
+42. 日报 `brief` 档 → 每条一行
+43. 日报 `full` 档 → 含理由、一句话、链接、token 尾行
+44. 重试：可重试异常重试 2 次后成功
+45. 重试：不可重试异常（Cookie 失效 / 412）立即抛出，不重试
+46. 记账：token / 调用次数累加正确
+47. 人设读取失败 → 走中性，不抛异常
+
+**峰谷**
+48. 工作日 10:00（高峰）→ 不调度
+49. 工作日 13:00（谷时）→ 可调度
+50. 周末任意时刻 → 可调度
+51. `peak_aware=false` → 忽略峰谷，按 windows 走
 
 ---
 
