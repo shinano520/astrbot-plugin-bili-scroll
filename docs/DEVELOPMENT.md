@@ -22,6 +22,7 @@ astrbot-plugin-bili-scroll/
 │   ├── audience.py            # 订阅管理 + 推送概率计算
 │   ├── profile.py             # 偏好画像与权重衰减
 │   ├── feedback.py            # 反馈信号分级
+│   ├── style.py               # 评论区风格归纳 / 生成 / 自检
 │   └── prompt.py              # 提示词构建（含注入防护）
 │
 ├── infra/                     # 基础设施层：IO 实现
@@ -84,6 +85,7 @@ adapter ──► service ──► domain
 | `domain/profile.py` | 权重更新、衰减、匹配度计算 | 不读写数据库 |
 | `domain/feedback.py` | 把一段文本分成 正/中/负 三档 | 不调 LLM（纯规则兜底） |
 | `domain/prompt.py` | 构建 prompt、包裹不可信内容 | 不调用 LLM |
+| `domain/style.py` | 归纳评论风格、生成候选、自检打分 | 不拉评论、不发评论 |
 | `infra/bili_client.py` | 调 B 站 API、重试、限速 | 不决定「挑哪条」 |
 | `infra/llm_client.py` | 调 provider、解析 JSON | 不写提示词 |
 | `infra/storage.py` | SQLite CRUD | 不做业务判断 |
@@ -313,6 +315,99 @@ def next_run_at(windows, jitter_minutes, now):
 
 每次执行后重新计算下一次。
 
+### 4.7 评论生成（`domain/style.py`）
+
+#### 4.7.1 三步流水线
+
+```python
+async def make_comment(video: Video, bili: BiliClient, llm: LlmClient, cfg) -> str | None:
+    # 1. 采样：拉当前视频热评
+    samples = await bili.get_comments(video.bvid, limit=cfg.style_sample_size)
+    samples = dedupe_bots(samples)              # 剔除重复率高的机器人评论
+    if len(samples) < 5:
+        return None                              # 样本太少，不出手
+
+    # 2. 归纳：LLM 抽结构化风格（只给特征，不给原文）
+    style = await llm.induce_style(samples)
+
+    # 3. 生成 + 自检（最多重写 N 次）
+    for _ in range(cfg.max_rewrites + 1):
+        text = await llm.write_comment(video, style)
+        if validate(text, cfg) and await llm.self_check(text, style) >= cfg.threshold:
+            return text
+    return None
+```
+
+#### 4.7.2 风格归纳的 prompt 约束
+
+```python
+STYLE_PROMPT = """
+下面是某视频的评论区样本。请**只输出风格特征 JSON**，不要复述任何一条评论原文。
+
+输出格式：
+{
+  "tone": "整体语气，如 调侃/认真/玩梗",
+  "length": "典型字数区间",
+  "slang": ["高频网络用语，最多 5 个"],
+  "punctuation": "标点习惯",
+  "emoji": "表情使用习惯",
+  "pattern": "常见句式",
+  "avoid": ["这个评论区不出现的表达"]
+}
+
+样本：
+<untrusted_content>{samples}</untrusted_content>
+"""
+```
+
+#### 4.7.3 生成时的约束
+
+```python
+COMMENT_SYSTEM = """
+你是「大肥鱼」，一只住在服务器里的人鱼。
+你的评论要满足：
+- 8–30 字
+- 至少含 1 个口语元素（网络梗 / 语气词 / 省略号 / 反问）
+- 不要出现：很不错、很有道理、感谢分享、支持一下、期待更多、受益匪浅
+- 不要出现「首先/其次/总之」「一方面/另一方面」
+- 只输出评论正文，不要引号、不要解释
+"""
+```
+
+#### 4.7.4 自检打分
+
+```python
+async def self_check(text: str, style: StyleProfile, llm) -> float:
+    """返回 0-1，判断这条评论像不像该评论区的人说的。"""
+```
+
+低于阈值重写；重写用完仍不达标 → **放弃，不发**。宁可不评论，也不发一条机器人腔。
+
+#### 4.7.5 机器人评论剔除
+
+```python
+def dedupe_bots(samples: list[str]) -> list[str]:
+    """去掉重复率高、模板化的评论。"""
+    # 规则：完全相同 / 前 6 字相同 / 含固定话术模板 → 丢弃
+```
+
+#### 4.7.6 配置项
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `comment.style_learning` | `true` | 启用风格学习 |
+| `comment.style_sample_size` | `30` | 采样条数 |
+| `comment.style_self_check_threshold` | `0.7` | 自检分数线 |
+| `comment.max_rewrites` | `2` | 重写次数上限 |
+| `comment.banned_phrases` | 内置 | 禁词表 |
+| `comment.style_library` | `false` | 是否积累风格库 |
+
+#### 4.7.7 成本
+
+每次评论最多 `1（归纳）+ 3（生成/重写）+ 3（自检）= 7` 次 LLM 调用。用 flash 级别模型，单次评论成本可接受。
+
+评论功能默认关，只有显式开启才会跑这条链路。
+
 ---
 
 ## 5. 接口抽象
@@ -409,6 +504,17 @@ class ProfileStore(Protocol):
 16. 时段外不触发
 17. 时段内触发
 18. 抖动范围正确
+
+**评论区风格**
+19. 样本少于 5 条 → 不生成评论，返回 None
+20. 归纳结果不得包含任何一条原评论的完整句子（防抄袭）
+21. 生成结果命中禁词表 → 重写
+22. 生成结果长度 < 8 或 > 30 → 重写
+23. 生成结果零口语元素（无梗/无语气词/无省略号/无反问）→ 重写
+24. 自检分数 < 0.7 → 重写
+25. 重写次数用尽仍不达标 → 返回 None，不发送
+26. 机器人评论剔除：完全相同 / 前 6 字相同 → 被过滤
+27. 风格归纳失败的样本不污染生成（脏数据不进 prompt）
 
 ---
 
