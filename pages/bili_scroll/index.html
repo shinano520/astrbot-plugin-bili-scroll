@@ -186,11 +186,16 @@
     } catch(e) {}
   }
   window.addEventListener('error', function(e){
-    showErr('JS 错误: ' + (e.message || e.error || ''));
+    var msg = String(e.message || e.error || '');
+    if (/metamask|ethereum|chrome-extension/i.test(msg)) return;
+    showErr('JS 错误: ' + msg);
   });
+  var NOISE = /metamask|ethereum|wallet|chrome-extension|moz-extension/i;
   window.addEventListener('unhandledrejection', function(e){
     var r = e.reason;
-    showErr('Promise 未捕获: ' + ((r && (r.message || r)) || ''));
+    var msg = String((r && (r.message || r)) || '');
+    if (NOISE.test(msg)) return;   // 别把别的东西的报错算到本插件头上
+    showErr('Promise 未捕获: ' + msg);
   });
 
   var ROOT = '/api/plug/astrbot_plugin_bili_scroll';
@@ -576,8 +581,14 @@
       dot.__bound = true;
     }
 
-    window.__biliLoadFollow = loadFollowings;
-    window.__biliSaveAt = saveAt;
+    // 暴露给模块作用域的兜底绑定用（boot2 里若中途异常，按钮仍可用）
+    window.__bili_genQr = genQr;
+    window.__bili_refreshStatus = refreshStatus;
+    window.__bili_loadFollowings = loadFollowings;
+    window.__bili_saveAt = saveAt;
+    window.__bili_loadConfig = loadConfig;
+    window.__bili_saveConfig = saveConfig;
+    window.__bili_runOnce = runOnce;
 
     refreshStatus();
   }
@@ -632,16 +643,22 @@
 
   // 兜底绑定：即使 boot2 里那段因为异常没跑到，这里也能点上
   (function bindFallback(){
-    var pairs = [
-      ['btnFollow', function(){ if (window.__biliLoadFollow) window.__biliLoadFollow(); }],
-      ['btnSaveAt', function(){ if (window.__biliSaveAt) window.__biliSaveAt(); }],
-    ];
-    pairs.forEach(function(pair){
-      var el = document.getElementById(pair[0]);
-      if (!el) return;
+    var map = {
+      btnGen: 'genQr',
+      btnRefresh: 'refreshStatus',
+      btnFollow: 'loadFollowings',
+      btnSaveAt: 'saveAt',
+      btnReload: 'loadConfig',
+      btnSaveCfg: 'saveConfig',
+      btnRun: 'runOnce'
+    };
+    Object.keys(map).forEach(function(btnId){
+      var el = document.getElementById(btnId);
+      var fn = window['__bili_' + map[btnId]];
+      if (!el || typeof fn !== 'function') return;
       if (el.__fallbackBound) return;
       el.__fallbackBound = true;
-      el.addEventListener('click', pair[1]);
+      el.addEventListener('click', fn);
     });
   })();
 })();
