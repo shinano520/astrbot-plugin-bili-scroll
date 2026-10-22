@@ -322,6 +322,10 @@ class WebPage:
                 detail = note or "扫码成功但没取到 Cookie"
             self._pending.pop(key, None)
 
+        # detail 为空时给个中文状态，前端好显示
+        if not detail and code != qr_login.ST_OK:
+            detail = qr_login.status_text(code)
+
         payload = {"ok": True, "code": code, "detail": detail}
         return jsonify(payload) if jsonify else payload
 
