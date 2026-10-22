@@ -532,6 +532,10 @@ class BiliScrollPlugin(Star):
             if video_index:
                 await self.push.dispatch(result.picked, video_index)
 
+            if dry_run and self._flag("comment_enable", False) and result.picked:
+                # 干跑也生成一条评论 + @ 预览（不发送），方便确认文案和 @ 是否对
+                await self._preview_comment(result.picked[0], umo)
+
             if not dry_run and self._flag("comment_enable", False) and result.picked:
                 await self._maybe_comment(result.picked, umo)
 
@@ -585,6 +589,40 @@ class BiliScrollPlugin(Star):
             pubdate=int(row["pubdate"] or 0),
             keywords=kws,
         )
+
+    async def _preview_comment(self, verdict: Any, umo: str | None = None) -> None:
+        """干跑预览：生成评论正文 + @，只写日志不发送。"""
+        try:
+            video = await self._video_for(getattr(verdict, "bvid", ""))
+            if video is None:
+                log.info("[预览] 找不到视频，跳过评论预览")
+                return
+            text = await make_comment(
+                video,
+                bili=self.bili,
+                llm=self.llm,
+                reason=getattr(verdict, "reason", ""),
+                umo=umo,
+                max_rewrites=int(self._num("comment_max_rewrites", 2)),
+                threshold=self._num("comment_style_threshold", 0.7),
+                sample_size=int(self._num("comment_style_sample_size", 30)),
+            )
+            if not text:
+                log.info("[预览] 评论生成失败，跳过")
+                return
+            if self._flag("at_enable", False):
+                users = list(self._get("at_users") or [])
+                prob = self._num("at_probability", 0.5)
+                before = text
+                text = append_at(text, users, prob)
+                if text != before:
+                    log.info("[预览] 这次命中 @（概率 %.0f%%）", prob * 100)
+                else:
+                    log.info("[预览] 这次没命中 @（概率 %.0f%%，多跑几次会中）", prob * 100)
+            log.info("[预览·不会真的发] %s → %s", video.bvid, text)
+            log.info("[预览] 真实运行（非测跑）时这条会发到 B 站评论区")
+        except Exception as e:
+            log.info("[预览] 出错：%s", truncate(str(e)))
 
     async def _maybe_comment(self, verdicts, umo: str | None) -> None:
         max_per_round = int(self._num("comment_max_per_round", 1))

@@ -402,6 +402,11 @@
     try { toast('已开始，约 1-3 分钟', true); } catch(e) {}
     try { showResult('已开始跑一轮（dry-run）。跑完点「刷新状态」看今日已挑。', true); } catch(e) {}
     apiPost('run', { dry: true }).then(function(d){
+      if (d && d.ok) {
+        // 跑完自动刷新状态（一轮通常 20-60 秒）
+        setTimeout(function(){ try { refreshStatus(); } catch(e) {} }, 5000);
+        setTimeout(function(){ try { refreshStatus(); } catch(e) {} }, 45000);
+      }
       if (!d || !d.ok) {
         try { toast('启动失败', false); } catch(e) {}
         try { showResult('启动失败：' + ((d && d.error) || ''), false); } catch(e) {}
@@ -559,6 +564,22 @@
     if (b) b.textContent = logPaused ? '继续' : '暂停';
   }
 
+  var statusTimer = null, statusPaused = false;
+
+  function statusTabActive(){
+    var el = document.getElementById('panel-login');
+    return !!(el && el.classList.contains('active'));
+  }
+
+  function startStatusPoll(){
+    if (statusTimer) return;
+    statusTimer = setInterval(function(){
+      if (statusPaused) return;
+      if (!statusTabActive()) return;
+      try { refreshStatus(); } catch(e) {}
+    }, 5000);
+  }
+
   function loadConfig(){
     window.__cfgLoaded = true;
     settingsBox.innerHTML = '<div class="placeholder">加载中…</div>';
@@ -687,6 +708,7 @@
     window.__bili_runOnce = runOnce;
 
     refreshStatus();
+    try { startStatusPoll(); } catch(e) {}
   }
 
   // Tab 切换
@@ -704,6 +726,9 @@
       // 加载要放在前面，别让上面任何异常把它拦掉
       if (btn.getAttribute('data-panel') === 'settings' && !window.__cfgLoaded) {
         try { loadConfig(); } catch (e) { try { showErr('加载设置失败: ' + e); } catch(_) {} }
+      }
+      if (btn.getAttribute('data-panel') === 'login') {
+        try { refreshStatus(); } catch (e) {}
       }
       if (btn.getAttribute('data-panel') === 'logs') {
         try { startLogs(); } catch (e) { try { showErr('启动日志失败: ' + e); } catch(_) {} }
