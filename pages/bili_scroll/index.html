@@ -190,16 +190,17 @@
     );
   }
 
-  function bridgeRequest(method, path, body){
+  function bridgeRequest(method, path, body, params){
     var api = bridgeApi();
     if (!api || typeof api.apiGet !== 'function') {
       return Promise.reject(new Error('no bridge'));
     }
-    // 关键：父窗口会拼成 /api/v1/plugins/extensions/<pluginName>/<endpoint>
-    // 所以这里只传 'status' / 'config'，绝不能带插件名
-    var ep = String(path || '').replace(/^\/+/, '');
+    // 关键1：父窗口会拼成 /api/v1/plugins/extensions/<pluginName>/<endpoint>
+    //        所以只传 'status'，绝不能带插件名
+    // 关键2：父窗口会拒绝带 ? # \ :// 的 endpoint ⇒ query 必须走 params
+    var ep = String(path || '').split(/[?#]/)[0].replace(/^\/+/, '');
     var call = (method === 'GET')
-      ? api.apiGet(ep, {})
+      ? api.apiGet(ep, params || {})
       : api.apiPost(ep, body || {});
     return Promise.resolve(call).then(function(res){
       if (res && res.status === 'error' && /未授权/.test(res.message || '')) {
@@ -209,10 +210,21 @@
     });
   }
 
-  function tokenRequest(method, path, body){
+  function tokenRequest(method, path, body, params){
     var t = getToken();
     var opt = { method: method, headers: {} };
     if (t) opt.headers['Authorization'] = 'Bearer ' + t;
+    var qs = '';
+    if (params && typeof params === 'object') {
+      var bits = [];
+      Object.keys(params).forEach(function(k){
+        if (params[k] !== undefined && params[k] !== null) {
+          bits.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
+        }
+      });
+      if (bits.length) qs = '?' + bits.join('&');
+    }
+    path = String(path || '').split(/[?#]/)[0] + qs;
     if (body !== undefined) {
       opt.headers['Content-Type'] = 'application/json';
       opt.body = JSON.stringify(body);
@@ -227,13 +239,13 @@
     });
   }
 
-  function request(method, path, body){
-    // 先用 bridge（自带登录态，无需密码）；3 秒没响应再退回 token 方式
-    return withTimeout(bridgeRequest(method, path, body), 8000, function(){
-      return tokenRequest(method, path, body);
+  function request(method, path, body, params){
+    // 先用 bridge（自带登录态，无需密码）；8 秒没响应再退回 token 方式
+    return withTimeout(bridgeRequest(method, path, body, params), 8000, function(){
+      return tokenRequest(method, path, body, params);
     });
   }
-  function apiGet(path, params){ return request('GET', path); }
+  function apiGet(path, params){ return request('GET', path, undefined, params); }
   function apiPost(path, body){ return request('POST', path, body); }
 
   var authbar = document.getElementById('authbar');
@@ -327,7 +339,7 @@
   function pollOnce(){
     if (!currentKey || busy) return;
     busy = true;
-    apiGet('/poll?key=' + encodeURIComponent(currentKey)).then(function(d){
+    apiGet('poll', { key: currentKey }).then(function(d){
       if (!d || !d.ok) return;
       if (d.code === 0) {
         stopTimer(); dot.classList.remove('pulse');

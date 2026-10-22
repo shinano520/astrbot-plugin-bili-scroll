@@ -296,12 +296,12 @@ class WebPage:
             return jsonify(payload) if jsonify else payload
 
         try:
-            code, cookie = await qr_login.poll_once(key)
+            code, cookie, note = await qr_login.poll_once(key)
         except Exception as e:
             payload = {"ok": False, "error": truncate(str(e))}
             return jsonify(payload) if jsonify else payload
 
-        detail = ""
+        detail = note or ""
         if code == qr_login.ST_OK:
             if cookie:
                 try:
@@ -309,12 +309,17 @@ class WebPage:
                     save_cookie(self.plugin.data_dir, cookie, key_bytes)
                     self.plugin.reload_bili_client(cookie)
                     check = await self.plugin.bili.check_login()
-                    detail = check.detail if check.ok else f"Cookie 已存但校验失败：{check.detail}"
-                    log.info("WebUI 扫码登录成功：%s", detail)
+                    if check.ok:
+                        detail = check.detail
+                        log.info("WebUI 扫码登录成功：%s", detail)
+                    else:
+                        detail = f"Cookie 已存但校验失败：{check.detail}"
+                        log.warning(detail)
                 except Exception as e:
                     detail = f"保存失败：{truncate(str(e))}"
+                    log.exception("保存 Cookie 失败")
             else:
-                detail = "扫码成功但没取到 Cookie"
+                detail = note or "扫码成功但没取到 Cookie"
             self._pending.pop(key, None)
 
         payload = {"ok": True, "code": code, "detail": detail}
