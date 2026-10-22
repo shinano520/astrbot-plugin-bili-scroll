@@ -23,6 +23,7 @@ astrbot-plugin-bili-scroll/
 │   ├── profile.py             # 偏好画像与权重衰减
 │   ├── feedback.py            # 反馈信号分级
 │   ├── style.py               # 评论区风格归纳 / 生成 / 自检
+│   ├── reply.py               # 楼中楼回复判定与生成
 │   └── prompt.py              # 提示词构建（含注入防护）
 │
 ├── infra/                     # 基础设施层：IO 实现
@@ -86,6 +87,7 @@ adapter ──► service ──► domain
 | `domain/feedback.py` | 把一段文本分成 正/中/负 三档 | 不调 LLM（纯规则兜底） |
 | `domain/prompt.py` | 构建 prompt、包裹不可信内容 | 不调用 LLM |
 | `domain/style.py` | 归纳评论风格、生成候选、自检打分 | 不拉评论、不发评论 |
+| `domain/reply.py` | 楼中楼判定（三条铁律）+ 回复生成 | 不拉评论、不发回复 |
 | `infra/bili_client.py` | 调 B 站 API、重试、限速 | 不决定「挑哪条」 |
 | `infra/llm_client.py` | 调 provider、解析 JSON | 不写提示词 |
 | `infra/storage.py` | SQLite CRUD | 不做业务判断 |
@@ -172,6 +174,20 @@ CREATE TABLE push_quota (
     count       INTEGER DEFAULT 0,
     PRIMARY KEY (date, scope, target_id)
 );
+
+-- 自己发过的评论（楼中楼回复的定位依据）
+CREATE TABLE own_comments (
+    rpid         TEXT PRIMARY KEY,       -- 评论 ID，取不到则记 'unknown'
+    root_rpid    TEXT,                   -- 楼中楼回复时填根评论 ID
+    bvid         TEXT NOT NULL,
+    content      TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    verified     INTEGER DEFAULT 0,      -- 0 未核 / 1 可见 / -1 没查到
+    verified_at  INTEGER,
+    replied      INTEGER DEFAULT 0       -- 是否已对该楼层做过回复处理
+);
+CREATE INDEX idx_own_created ON own_comments(created_at);
+CREATE INDEX idx_own_unverified ON own_comments(verified) WHERE verified = 0;
 ```
 
 ### 3.2 数据类（`domain/models.py`）
@@ -408,6 +424,124 @@ def dedupe_bots(samples: list[str]) -> list[str]:
 
 评论功能默认关，只有显式开启才会跑这条链路。
 
+### 4.8 楼中楼回复（`domain/reply.py`）
+
+#### 4.8.1 三条铁律的代码化
+
+```python
+def should_reply(comment: Comment, cfg) -> bool:
+    """三条必须同时满足，缺一即跳過。"""
+    return (
+        comment.is_direct_reply_to_me      # ① 直接回在我那条下面
+        and comment.is_usage_question      # ② 问的是插件怎么用
+        and comment.is_answerable_briefly  # ③ 一两句话能答清
+    )
+```
+
+三条都不满足或任一条拿不准 → **跳过**。跳过比胡说便宜。
+
+#### 4.8.2 六类拒答
+
+```python
+REFUSE_PATTERNS = {
+    "code":     ["源码", "代码发", "给我代码"],
+    "work":     ["帮我写", "帮我做", "代做"],
+    "promise":  ["以后都", "每天帮我", "保证"],
+    "quarrel":  ["你是不是", "胡说", "垃圾"],
+    "long":     None,          # 由 LLM 判断是否需要多轮
+    "privacy":  ["你叫什么", "住哪", "微信号", "账号密码"],
+}
+```
+
+命中任一类 → 不回。
+
+#### 4.8.3 主流程
+
+```python
+async def run_reply_round(bili: BiliClient, llm: LlmClient, store: Repository, cfg) -> ReplyResult:
+    replied = 0
+    # 1. 拉最近 7 天自己发过的评论
+    own = store.list_own_comments(since_days=7)
+    for oc in own:
+        if oc.replied or replied >= cfg.max_per_round:
+            continue
+        # 2. 拉该评论的楼中楼
+        replies = await bili.get_sub_replies(oc.bvid, oc.rpid)
+        for r in replies:
+            if not should_reply(r, cfg):
+                continue
+            # 3. 生成（≤100 字，工具调用 ≤2 次）
+            text = await llm.write_reply(r, max_len=cfg.max_length)
+            if not text:
+                continue
+            # 4. 发送，拿回 rpid + root
+            new_rpid, root = await bili.reply_comment(oc.bvid, text, root=oc.rpid)
+            store.save_own_comment(new_rpid, root, oc.bvid, text)
+            replied += 1
+            if replied >= cfg.max_per_round:
+                break
+        store.mark_replied(oc.rpid)
+    return ReplyResult(replied)
+```
+
+#### 4.8.4 rpid 取不到怎么办
+
+```python
+new_rpid, root = await bili.reply_comment(...)
+store.save_own_comment(
+    rpid=new_rpid or "unknown",     # 取不到写 unknown，绝不编数字
+    root_rpid=root,
+    ...
+)
+```
+
+**为什么不能编**：下一轮靠 rpid 定位自己那条评论，编一个号会导致复核永远查不到、判重失效。
+
+#### 4.8.5 复核
+
+```python
+async def verify_comments(bili: BiliClient, store: Repository, cfg) -> None:
+    """发完 90 秒后核一次公开可见性。"""
+    pending = store.list_unverified()
+    for oc in pending:
+        if oc.rpid == "unknown":
+            continue                          # 没 rpid 核不了，跳过
+        found = await bili.find_comment(oc.bvid, oc.rpid, root=oc.root_rpid)
+        store.set_verified(oc.rpid, 1 if found else -1)
+```
+
+**措辞**：查不到记 `-1`，报告里写「**没查到**」，不写「没发出去」。
+
+#### 4.8.6 提示注入
+
+楼中楼里对方的话同样包 `<untrusted_content>`：
+
+```python
+REPLY_PROMPT = """
+下面是你一条评论下的回复。请判断并回复。
+
+回复规则：
+- ≤ {max_len} 字
+- 只回答「插件怎么用」类问题
+- 要代码/要作品/要承诺/吵架/长篇追问/要隐私 → 输出空字符串
+
+<untrusted_content source="bilibili_reply">
+{content}
+</untrusted_content>
+"""
+```
+
+#### 4.8.7 成本
+
+| 项 | 每轮 |
+| --- | --- |
+| 拉自己评论 | 1 次 API |
+| 拉楼中楼 | ≤ 7 次 API |
+| LLM 判断 + 生成 | ≤ 2×2 次 |
+| 复核 | 1 次 API |
+
+默认关，开启后每轮最多 2 条回复。
+
 ---
 
 ## 5. 接口抽象
@@ -515,6 +649,19 @@ class ProfileStore(Protocol):
 25. 重写次数用尽仍不达标 → 返回 None，不发送
 26. 机器人评论剔除：完全相同 / 前 6 字相同 → 被过滤
 27. 风格归纳失败的样本不污染生成（脏数据不进 prompt）
+
+**楼中楼回复**
+28. 不是直接回在自己评论下面 → 不回
+29. 问的是视频内容而非插件用法 → 不回
+30. 需要多轮才能答清 → 跳过
+31. 要代码 / 要作品 / 要承诺 → 不回
+32. 要隐私（账号/身份/位置） → 不回
+33. 生成内容超 100 字 → 截断或放弃
+34. 单条回复工具调用超 2 次 → 中止
+35. 发送返回无 rpid → 记 `unknown`，绝不编造数字
+36. 复核查不到 → 记 `-1`，报告措辞必须是「没查到」
+37. 每轮回复数达上限 → 停止
+38. 楼中楼内含「忽略设定」等注入文本 → 不执行，仅当素材
 
 ---
 
