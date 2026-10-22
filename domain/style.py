@@ -71,6 +71,7 @@ async def make_comment(
     sample_size: int = COMMENT_STYLE_SAMPLE_SIZE,
 ) -> str | None:
     """返回合格评论，或 None（宁可不发）。"""
+    log.info("[评论] 开始 bvid=%s", video.bvid)
     try:
         raw_samples = await bili.get_comments(video.bvid, limit=sample_size)
     except Exception as e:
@@ -78,6 +79,7 @@ async def make_comment(
         return None
 
     samples = dedupe_bots(raw_samples or [])
+    log.info("[评论] 原始 %d 条，去重后 %d 条", len(raw_samples or []), len(samples))
     if len(samples) < 5:
         log.info("评论样本不足（%d 条），不生成评论", len(samples))
         return None
@@ -89,11 +91,14 @@ async def make_comment(
         style = {}
 
     for attempt in range(max_rewrites + 1):
+        log.info("[评论] 第 %d 次生成", attempt + 1)
         try:
             text = await llm.write_comment(video, style, reason, umo=umo)
         except Exception as e:
             log.info("生成评论失败（第 %d 次）：%s", attempt + 1, e)
             continue
+
+        log.info("[评论] 生成长度=%d 内容=%r", len(text or ""), (text or "")[:80])
 
         ok, why = validate_comment(
             text,
