@@ -98,6 +98,18 @@
   }
   .toast.show{opacity:1;transform:translateY(0)}
   .toast.err{background:rgba(255,92,92,.95);color:#fff}
+  .logbox{
+    margin-top:10px;max-height:430px;overflow-y:auto;
+    background:#0b0f14;border:1px solid #262e39;border-radius:10px;
+    padding:10px 12px;font-family:ui-monospace,Consolas,monospace;
+    font-size:12px;line-height:1.7;
+  }
+  .logline{display:flex;gap:8px;white-space:pre-wrap;word-break:break-word}
+  .logline .t{color:#55677a;flex:0 0 auto}
+  .logline .s{color:#3ecf8e;flex:0 0 auto;min-width:56px}
+  .logline .m{color:#c3ccd8}
+  .logline.warn .m{color:#f5c518}
+  .logline.err .m{color:#ff6b6b}
   .sticky-bar{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:16px 0 4px;display:flex;gap:10px;justify-content:flex-end}
 </style>
 </head>
@@ -117,6 +129,7 @@
     <button class="tab active" data-panel="login">登录</button>
     <button class="tab" data-panel="settings">设置</button>
     <button class="tab" data-panel="atusers">评论 @ 谁</button>
+    <button class="tab" data-panel="logs">日志</button>
   </div>
 
   <div class="panel active" id="panel-login">
@@ -173,6 +186,17 @@
   </div>
 
   <div class="toast" id="toast"></div>
+  <div class="panel" id="panel-logs">
+    <div class="card">
+      <h2>实时日志</h2>
+      <div class="desc">扫码、跑一轮、判读、评论、推送的每一步都在这。2 秒自动刷新。</div>
+      <div class="actions" style="margin-top:0;margin-bottom:8px">
+        <button id="btnLogClear">清空</button>
+        <button id="btnLogPause">暂停</button>
+      </div>
+      <div class="logbox" id="logBox"><div class="placeholder">切到这个标签页开始接收…</div></div>
+    </div>
+  </div>
 </div>
 
 <script type="module">
@@ -484,6 +508,57 @@
     });
   }
 
+  var logLast = 0, logPaused = false, logTimer = null, logStarted = false;
+
+  function renderLogs(items){
+    var box = document.getElementById('logBox');
+    if (!box || !items || !items.length) return;
+    if (box.querySelector('.placeholder')) box.innerHTML = '';
+    var atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    var frag = [];
+    items.forEach(function(it){
+      var cls = (it.lv === 'ERROR' || it.lv === 'CRITICAL') ? ' err'
+              : (it.lv === 'WARNING') ? ' warn' : '';
+      frag.push('<div class="logline' + cls + '">'
+        + '<span class="t">' + esc(it.t) + '</span>'
+        + '<span class="s">' + esc(it.src) + '</span>'
+        + '<span class="m">' + esc(it.msg) + '</span></div>');
+    });
+    box.insertAdjacentHTML('beforeend', frag.join(''));
+    while (box.children.length > 800) box.removeChild(box.firstChild);
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function pollLogs(){
+    if (logPaused) return;
+    apiGet('logs', { after: logLast }).then(function(d){
+      if (!d || !d.ok) return;
+      logLast = d.last || logLast;
+      renderLogs(d.items || []);
+    }).catch(function(){});
+  }
+
+  function startLogs(){
+    if (logStarted) return;
+    logStarted = true;
+    logTimer = setInterval(pollLogs, 2000);
+    pollLogs();
+  }
+
+  function clearLogs(){
+    apiPost('logs/clear', {}).then(function(){
+      logLast = 0;
+      var box = document.getElementById('logBox');
+      if (box) box.innerHTML = '<div class="placeholder">已清空，等待新日志…</div>';
+    }).catch(function(){});
+  }
+
+  function toggleLogPause(){
+    logPaused = !logPaused;
+    var b = document.getElementById('btnLogPause');
+    if (b) b.textContent = logPaused ? '继续' : '暂停';
+  }
+
   function loadConfig(){
     window.__cfgLoaded = true;
     settingsBox.innerHTML = '<div class="placeholder">加载中…</div>';
@@ -630,6 +705,9 @@
       if (btn.getAttribute('data-panel') === 'settings' && !window.__cfgLoaded) {
         try { loadConfig(); } catch (e) { try { showErr('加载设置失败: ' + e); } catch(_) {} }
       }
+      if (btn.getAttribute('data-panel') === 'logs') {
+        try { startLogs(); } catch (e) { try { showErr('启动日志失败: ' + e); } catch(_) {} }
+      }
     });
   });
 
@@ -671,6 +749,13 @@
   autoAuth();
 
   // 兜底绑定：即使 boot2 里那段因为异常没跑到，这里也能点上
+  (function bindLogButtons(){
+    var clr = document.getElementById('btnLogClear');
+    if (clr) clr.addEventListener('click', function(){ try { clearLogs(); } catch(e) {} });
+    var pau = document.getElementById('btnLogPause');
+    if (pau) pau.addEventListener('click', function(){ try { toggleLogPause(); } catch(e) {} });
+  })();
+
   (function bindFallback(){
     var map = {
       btnGen: 'genQr',

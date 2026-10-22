@@ -547,6 +547,36 @@ class WebPage:
 
         return jsonify(payload) if jsonify else payload
 
+    # ── 实时日志 ──────────────────────────────────────────────
+    async def logs(self):
+        """返回增量日志。?after=<seq> 只取更新的部分。"""
+        after = 0
+        limit = 300
+        try:
+            from quart import request
+
+            after = int(request.args.get("after", 0) or 0)
+            limit = int(request.args.get("limit", 300) or 300)
+        except Exception:
+            pass
+        try:
+            from ..infra.logger import RING
+
+            items = RING.since(after, limit)
+            payload = {"ok": True, "items": items, "last": RING.last_seq}
+        except Exception as e:
+            payload = {"ok": False, "error": truncate(str(e)), "items": [], "last": 0}
+        return payload
+
+    async def logs_clear(self):
+        try:
+            from ..infra.logger import RING
+
+            RING.clear()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": truncate(str(e))}
+
     # ── 状态 ──────────────────────────────────────────────────
     async def status(self):
         try:

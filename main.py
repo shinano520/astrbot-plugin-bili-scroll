@@ -207,6 +207,8 @@ class BiliScrollPlugin(Star):
             ("personas", self.web.personas, ["GET"], "人设列表"),
             ("bootstrap", self.web.bootstrap, ["POST"], "免密换取 token"),
             ("run", self.web.run_once, ["POST"], "手动跑一轮"),
+            ("logs", self.web.logs, ["GET"], "实时日志"),
+            ("logs/clear", self.web.logs_clear, ["POST"], "清空日志"),
         )
         for endpoint, handler, methods, desc in routes:
             try:
