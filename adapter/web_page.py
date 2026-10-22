@@ -520,6 +520,33 @@ class WebPage:
 
         return jsonify(payload) if jsonify else payload
 
+    # ── 手动跑一轮 ────────────────────────────────────────────
+    async def run_once(self):
+        """手动触发一轮。body: {"dry": true} 只搜索+判读，不发评论/推送。"""
+        try:
+            from quart import jsonify, request
+
+            body = await request.get_json(silent=True) or {}
+        except Exception:
+            jsonify = None
+            body = {}
+
+        dry = bool(body.get("dry", False))
+        try:
+            if self.plugin._running:
+                payload = {"ok": False, "error": "已经有一轮在跑"}
+                return jsonify(payload) if jsonify else payload
+
+            import asyncio
+
+            asyncio.create_task(self.plugin._run_round(None, dry_run=dry))
+            payload = {"ok": True, "dry": dry, "message": "已开始，跑完看日志或状态"}
+            log.info("WebUI 手动触发一轮（dry=%s）", dry)
+        except Exception as e:
+            payload = {"ok": False, "error": truncate(str(e))}
+
+        return jsonify(payload) if jsonify else payload
+
     # ── 状态 ──────────────────────────────────────────────────
     async def status(self):
         try:

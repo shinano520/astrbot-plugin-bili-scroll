@@ -133,6 +133,7 @@
           <div class="actions">
             <button class="primary" id="btnGen">扫码登录</button>
             <button id="btnRefresh">刷新状态</button>
+            <button id="btnRun">测跑一轮</button>
           </div>
           <div class="result" id="result"></div>
         </div>
@@ -542,6 +543,7 @@
 
     if (!dot.__bound) {
       document.getElementById('btnGen').addEventListener('click', genQr);
+    document.getElementById('btnRun').addEventListener('click', runOnce);
       document.getElementById('btnRefresh').addEventListener('click', refreshStatus);
       document.getElementById('btnFollow').addEventListener('click', loadFollowings);
       document.getElementById('btnSaveAt').addEventListener('click', saveAt);

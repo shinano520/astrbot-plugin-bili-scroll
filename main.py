@@ -206,6 +206,7 @@ class BiliScrollPlugin(Star):
             ("config", self.web.config_save, ["POST"], "保存插件设置"),
             ("personas", self.web.personas, ["GET"], "人设列表"),
             ("bootstrap", self.web.bootstrap, ["POST"], "免密换取 token"),
+            ("run", self.web.run_once, ["POST"], "手动跑一轮"),
         )
         for endpoint, handler, methods, desc in routes:
             try:
@@ -487,7 +488,7 @@ class BiliScrollPlugin(Star):
             log.debug("消息钩子处理失败", exc_info=True)
 
     # ── 一轮执行 ──────────────────────────────────────────────
-    async def _run_round(self, umo: str | None = None) -> None:
+    async def _run_round(self, umo: str | None = None, dry_run: bool = False) -> None:
         if self._running:
             return
         self._running = True
@@ -522,17 +523,17 @@ class BiliScrollPlugin(Star):
             )
 
             video_index = {}
-            for v in result.picked:
+            for v in ([] if dry_run else result.picked):
                 video = await self._video_for(v.bvid)
                 if video is not None:
                     video_index[v.bvid] = video
             if video_index:
                 await self.push.dispatch(result.picked, video_index)
 
-            if self._flag("comment_enable", False) and result.picked:
+            if not dry_run and self._flag("comment_enable", False) and result.picked:
                 await self._maybe_comment(result.picked, umo)
 
-            if self._flag("reply_enable", False):
+            if not dry_run and self._flag("reply_enable", False):
                 await run_reply_round(
                     bili=self.bili,
                     llm=self.llm,
